@@ -6,9 +6,9 @@
 |---|---|---|---|
 | **Serveur VPS (OVH, Hetzner…)** | Employés **et clients**, depuis partout | 5 à 10 € / mois + nom de domaine | **Recommandé** |
 | PC/serveur dans les locaux | Employés uniquement, sur le réseau du bureau | Matériel existant | Simple, mais les clients ne peuvent pas se connecter de l'extérieur |
-| Render / Railway | Employés et clients | 7 à 20 $ / mois | Possible, mais il faut payer un **disque persistant** sinon la base est effacée à chaque redémarrage |
+| Render / Railway + MongoDB Atlas | Employés et clients | 7 à 20 $ / mois | Possible : l'application chez Render/Railway, la base chez Atlas |
 
-Comme l'application a un espace client, il faut qu'elle soit accessible sur Internet : un **VPS** est le meilleur compromis (prix fixe, base SQLite conservée, vous gardez la main sur vos données).
+Comme l'application a un espace client, il faut qu'elle soit accessible sur Internet : un **VPS** est le meilleur compromis (prix fixe, MongoDB sur le même serveur, vous gardez la main sur vos données).
 
 ---
 
@@ -24,7 +24,12 @@ Chez votre registrar, créez un enregistrement **A** : `stock.votresociete.tn` �
 ssh root@IP_DU_VPS
 apt update && apt upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs nginx unzip sqlite3
+apt install -y nodejs nginx unzip gnupg
+# MongoDB 8 (dépôt officiel)
+curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor
+echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-8.0.list
+apt update && apt install -y mongodb-org
+systemctl enable --now mongod
 npm install -g pm2
 adduser --disabled-password --gecos "" immo
 ```
@@ -41,7 +46,7 @@ unzip immo-stock.zip && cd immo-stock
 npm run install:all
 npm run build
 cp server/.env.example server/.env
-nano server/.env          # PORT=3001, réglages email (voir plus bas)
+nano server/.env          # PORT, MONGODB_URI (si Atlas), réglages email (voir plus bas)
 ```
 
 ### 4. Créer le compte société (sans données d'exemple)
@@ -80,32 +85,47 @@ ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
 L'application est alors disponible sur **https://stock.votresociete.tn** pour vos employés et vos clients.
 
 ### 7. Sauvegardes (indispensable)
-Toutes les données sont dans `server/data/immo.db`. Sauvegarde quotidienne à 2 h, 30 jours conservés :
+Les données sont dans MongoDB. Sauvegarde quotidienne à 2 h, 30 jours conservés :
 ```bash
 su - immo
-mkdir -p ~/sauvegardes
 crontab -e
 # ajouter la ligne :
-0 2 * * * sqlite3 ~/immo-stock/server/data/immo.db ".backup '/home/immo/sauvegardes/immo-$(date +\%F).db'" && find ~/sauvegardes -name '*.db' -mtime +30 -delete
+0 2 * * * cd ~/immo-stock/server && /usr/bin/node --env-file-if-exists=.env src/backup.js /home/immo/sauvegardes 30
 ```
-Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…). Les hébergeurs proposent souvent une option de sauvegarde automatique du VPS en plus.
+Restauration (remplace tout le contenu actuel) : `pm2 stop immo-stock && npm run restore -- /home/immo/sauvegardes/immo-AAAA-MM-JJ-... && pm2 start immo-stock`.
 
-### 8. Emails de relance (facultatif)
-Dans `server/.env`, renseignez le serveur SMTP de votre messagerie (Gmail avec mot de passe d'application, Microsoft 365, ou un service comme Brevo) :
+Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…).
+
+### 8. Emails de relance
+Le serveur vérifie les échéances toutes les 6 heures. Pour chaque client en retard, il envoie **un seul email** qui regroupe toutes ses échéances impayées, avec une copie à la société (`ALERT_EMAIL`). Un même client n'est pas relancé plus d'une fois tous les 7 jours (réglable avec `INTERVALLE_RELANCE_JOURS`). Le bouton « Relancer » du tableau de bord permet aussi d'envoyer un email immédiatement.
+
+Renseignez la messagerie qui envoie les emails dans `server/.env`, puis redémarrez l'application (`pm2 restart immo-stock`).
+
+**Gmail ou Google Workspace** : activez la validation en deux étapes sur le compte, puis créez un *mot de passe d'application* (Compte Google → Sécurité → Mots de passe des applications). Utilisez ce mot de passe de 16 caractères, pas le mot de passe habituel.
 ```
-SMTP_HOST=smtp-relay.brevo.com
+SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=...
-SMTP_PASS=...
-SMTP_FROM=Service commercial <commercial@votresociete.tn>
+SMTP_USER=votre.adresse@gmail.com
+SMTP_PASS=abcdefghijklmnop
+SMTP_FROM=Service commercial <votre.adresse@gmail.com>
 ALERT_EMAIL=commercial@votresociete.tn
 ```
-Puis `pm2 restart immo-stock`.
+
+**Microsoft 365 / Outlook** : `SMTP_HOST=smtp.office365.com`, `SMTP_PORT=587`, avec l'adresse et le mot de passe de la boîte d'envoi. L'administrateur doit autoriser « SMTP authentifié » pour cette boîte.
+
+**Messagerie de votre hébergeur de domaine** (OVH, etc.) : utilisez les paramètres SMTP qu'il fournit. Avec le port 465, ajoutez `SMTP_SECURE=true`.
+
+Pour vérifier les réglages, envoyez-vous un email de test :
+```
+npm run test-email -- votre.adresse@exemple.com
+```
+
+Si un envoi échoue (mot de passe incorrect, serveur injoignable), l'erreur s'affiche dans les journaux de l'application et l'envoi est retenté à la vérification suivante.
 
 ### Mettre à jour l'application
 ```bash
 su - immo && cd immo-stock
-# remplacer les fichiers par la nouvelle version (sans toucher à server/data ni server/.env)
+# remplacer les fichiers par la nouvelle version (sans toucher à server/.env)
 npm run install:all && npm run build && pm2 restart immo-stock
 ```
 

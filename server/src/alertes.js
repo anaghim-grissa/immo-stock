@@ -1,6 +1,6 @@
 // Vérification périodique des échéances en retard et envoi des relances par email.
 // Sans configuration SMTP, les alertes restent visibles dans le tableau de bord et sont journalisées.
-import { db } from './db.js';
+import { Vente } from './db.js';
 import { listerAlertes, messageRelance } from './domain.js';
 
 const INTERVALLE_RELANCE_JOURS = Number(process.env.INTERVALLE_RELANCE_JOURS || 7);
@@ -20,43 +20,59 @@ async function getTransporter() {
   return transporter;
 }
 
-function relanceRecente(echeanceId) {
-  const r = db.prepare(`SELECT 1 FROM relances WHERE echeance_id = ? AND envoye_le >= datetime('now', ?)`)
-    .get(echeanceId, `-${INTERVALLE_RELANCE_JOURS} days`);
-  return !!r;
+const relanceRecente = (alerte) =>
+  !!alerte.derniere_relance && Date.now() - Date.parse(alerte.derniere_relance) < INTERVALLE_RELANCE_JOURS * 86400000;
+
+async function noterRelance(alerte, canal, destinataire = null) {
+  const v = await Vente.findById(alerte.vente_id);
+  v?.echeances.id(alerte.id)?.relances.push({ canal, destinataire });
+  await v?.save();
 }
 
-export async function envoyerRelance(alerte, { force = false } = {}) {
-  if (!force && relanceRecente(alerte.id)) return { envoye: false, raison: 'déjà relancé récemment' };
+/**
+ * Relance un client par email pour une ou plusieurs de ses échéances en retard.
+ */
+export async function envoyerRelance(alertes, { force = false } = {}) {
+  const liste = (Array.isArray(alertes) ? alertes : [alertes]).filter((a) => force || !relanceRecente(a));
+  if (!liste.length) return { envoye: false, canaux: [], raison: 'déjà relancé récemment' };
+  const a = liste[0];
+  const canaux = [], erreurs = [];
+
   const t = await getTransporter();
-  const texte = messageRelance(alerte);
-  const destinataires = [alerte.client_email, process.env.ALERT_EMAIL].filter(Boolean);
+  const destinataires = [a.client_email, process.env.ALERT_EMAIL].filter(Boolean);
   if (t && destinataires.length) {
-    await t.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: alerte.client_email || process.env.ALERT_EMAIL,
-      cc: alerte.client_email && process.env.ALERT_EMAIL ? process.env.ALERT_EMAIL : undefined,
-      subject: `Échéance impayée – ${alerte.lots.join(', ')}`,
-      text: texte,
-    });
-    db.prepare('INSERT INTO relances (echeance_id, canal, destinataire) VALUES (?, ?, ?)').run(alerte.id, 'email', destinataires.join(', '));
-    return { envoye: true, canal: 'email' };
+    try {
+      await t.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to: a.client_email || process.env.ALERT_EMAIL,
+        cc: a.client_email && process.env.ALERT_EMAIL ? process.env.ALERT_EMAIL : undefined,
+        subject: `Échéance impayée – ${[...new Set(liste.flatMap((x) => x.lots))].join(', ')}`,
+        text: messageRelance(liste),
+      });
+      for (const x of liste) await noterRelance(x, 'email', destinataires.join(', '));
+      canaux.push('email');
+    } catch (e) { erreurs.push(`email : ${e.message}`); }
   }
-  db.prepare('INSERT INTO relances (echeance_id, canal, destinataire) VALUES (?, ?, ?)').run(alerte.id, 'journal', null);
-  console.log(`[alerte] ${alerte.client_nom} – ${alerte.libelle} – ${alerte.reste} DT – ${alerte.jours} j de retard`);
-  return { envoye: false, canal: 'journal', raison: 'SMTP non configuré' };
+
+  // Un envoi en échec n'est pas noté : il sera retenté à la prochaine vérification.
+  if (!canaux.length && !erreurs.length) for (const x of liste) await noterRelance(x, 'journal');
+  if (!canaux.length) console.log(`[alerte] ${a.client_nom} – ${liste.length} échéance(s) en retard${erreurs.length ? ` – ${erreurs.join(' ; ')}` : ''}`);
+  return { envoye: canaux.length > 0, canaux, erreurs };
 }
 
+/** Vérifie les retards et envoie au plus une relance groupée par client. */
 export async function verifierEcheances() {
-  const enRetard = listerAlertes().filter((a) => a.etat === 'retard');
-  for (const a of enRetard) {
-    try { await envoyerRelance(a); } catch (e) { console.error('[alerte] échec envoi', a.id, e.message); }
+  const enRetard = (await listerAlertes()).filter((a) => a.etat === 'retard' && !relanceRecente(a));
+  const parClient = Map.groupBy(enRetard, (a) => a.client_id);
+  for (const alertes of parClient.values()) {
+    try { await envoyerRelance(alertes); } catch (e) { console.error('[alerte] échec relance', alertes[0].client_nom, e.message); }
   }
   return enRetard.length;
 }
 
 export function demarrerVerificationPeriodique() {
   const heures = Number(process.env.VERIF_INTERVALLE_HEURES || 6);
-  verifierEcheances();
-  setInterval(verifierEcheances, heures * 3600 * 1000).unref();
+  const lancer = () => verifierEcheances().catch((e) => console.error('[alerte] vérification impossible', e.message));
+  lancer();
+  setInterval(lancer, heures * 3600 * 1000).unref();
 }

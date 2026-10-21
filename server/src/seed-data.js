@@ -1,64 +1,68 @@
 // Données d'exemple (efface la base existante).
-import { db, tx } from './db.js';
+import { Lot, Client, Vente, User, Session, Objectif } from './db.js';
 import { hashPassword } from './auth.js';
 import { genererEcheancier, todayISO } from './domain.js';
 
 const mois = (n) => { const d = new Date(); d.setMonth(d.getMonth() + n); return todayISO(d); };
 
-export function seed() {
-  tx(() => {
-    db.exec('DELETE FROM sessions; DELETE FROM users; DELETE FROM relances; DELETE FROM paiements; DELETE FROM echeances; DELETE FROM vente_lots; DELETE FROM ventes; DELETE FROM clients; DELETE FROM lots;');
+export async function seed() {
+  await Promise.all([Session, User, Vente, Client, Lot, Objectif].map((m) => m.deleteMany({})));
 
-    const insLot = db.prepare('INSERT INTO lots (ref, type, bloc, niveau, typologie, surface, prix) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    const lots = {};
-    const typos = [['S+1', 72, 210000], ['S+2', 98, 285000], ['S+3', 126, 365000]];
-    for (const bloc of ['A', 'B']) {
-      for (let niv = 0; niv <= 3; niv++) {
-        typos.forEach(([t, s, p], i) => {
-          const ref = `${bloc}-${niv}0${i + 1}`;
-          lots[ref] = Number(insLot.run(ref, 'appartement', bloc, niv === 0 ? 'RDC' : `${niv}e étage`, t, s, p + niv * 6000).lastInsertRowid);
-        });
-      }
+  const lots = [];
+  const typos = [['S+1', 72, 210000], ['S+2', 98, 285000], ['S+3', 126, 365000]];
+  for (const bloc of ['A', 'B']) {
+    for (let niv = 0; niv <= 3; niv++) {
+      typos.forEach(([t, s, p], i) => lots.push({ ref: `${bloc}-${niv}0${i + 1}`, type: 'appartement', bloc, niveau: niv === 0 ? 'RDC' : `${niv}e étage`, typologie: t, surface: s, prix: p + niv * 6000 }));
     }
-    for (let i = 1; i <= 10; i++) lots[`C-${String(i).padStart(2, '0')}`] = Number(insLot.run(`C-${String(i).padStart(2, '0')}`, 'cellier', null, 'Sous-sol -1', null, 6 + (i % 3) * 2, 12000 + (i % 3) * 3000).lastInsertRowid);
-    for (let i = 1; i <= 16; i++) lots[`P-${String(i).padStart(2, '0')}`] = Number(insLot.run(`P-${String(i).padStart(2, '0')}`, 'parking', null, i <= 8 ? 'Sous-sol -1' : 'Sous-sol -2', null, 12.5, 18000).lastInsertRowid);
-    db.prepare('UPDATE lots SET bloque = 1, notes = ? WHERE ref = ?').run('Réservé promoteur', 'B-303');
+  }
+  for (let i = 1; i <= 10; i++) lots.push({ ref: `C-${String(i).padStart(2, '0')}`, type: 'cellier', niveau: 'Sous-sol -1', surface: 6 + (i % 3) * 2, prix: 12000 + (i % 3) * 3000 });
+  for (let i = 1; i <= 16; i++) lots.push({ ref: `P-${String(i).padStart(2, '0')}`, type: 'parking', niveau: i <= 8 ? 'Sous-sol -1' : 'Sous-sol -2', surface: 12.5, prix: 18000 });
+  const b303 = lots.find((l) => l.ref === 'B-303');
+  Object.assign(b303, { bloque: true, notes: 'Réservé promoteur' });
+  const parRef = Object.fromEntries((await Lot.insertMany(lots)).map((l) => [l.ref, l]));
 
-    const insClient = db.prepare('INSERT INTO clients (nom, cin, tel, email, adresse) VALUES (?, ?, ?, ?, ?)');
-    const clients = [
-      ['Exemple – Amine Ben Salah', '08123456', '+216 22 345 678', 'amine.exemple@mail.tn', 'Tunis'],
-      ['Exemple – Sonia Trabelsi', '07654321', '+216 98 765 432', 'sonia.exemple@mail.tn', 'Ariana'],
-      ['Exemple – Karim Jaziri', '09887766', '+216 55 112 233', 'karim.exemple@mail.tn', 'La Marsa'],
-      ['Exemple – Leila Mansour', '06554433', '+216 21 908 070', 'leila.exemple@mail.tn', 'Sousse'],
-    ].map((c) => Number(insClient.run(...c).lastInsertRowid));
+  const clients = await Client.insertMany([
+    { nom: 'Exemple – Amine Ben Salah', cin: '08123456', tel: '+216 22 345 678', email: 'amine.exemple@mail.tn', adresse: 'Tunis' },
+    { nom: 'Exemple – Sonia Trabelsi', cin: '07654321', tel: '+216 98 765 432', email: 'sonia.exemple@mail.tn', adresse: 'Ariana' },
+    { nom: 'Exemple – Karim Jaziri', cin: '09887766', tel: '+216 55 112 233', email: 'karim.exemple@mail.tn', adresse: 'La Marsa' },
+    { nom: 'Exemple – Leila Mansour', cin: '06554433', tel: '+216 21 908 070', email: 'leila.exemple@mail.tn', adresse: 'Sousse' },
+    { nom: 'Exemple – Hichem Gharbi', cin: '05443322', tel: '+216 50 223 344', email: 'hichem.exemple@mail.tn', adresse: 'Nabeul' },
+    { nom: 'Exemple – Rim Ayari', cin: '04332211', tel: '+216 92 445 566', email: 'rim.exemple@mail.tn', adresse: 'Tunis' },
+  ]);
 
-    const prixLots = (refs) => refs.reduce((s, r) => s + db.prepare('SELECT prix FROM lots WHERE id = ?').get(lots[r]).prix, 0);
-    const insVente = db.prepare('INSERT INTO ventes (client_id, statut, prix_total, date_signature) VALUES (?, ?, ?, ?)');
-    const insVL = db.prepare('INSERT INTO vente_lots (vente_id, lot_id) VALUES (?, ?)');
-    const insE = db.prepare('INSERT INTO echeances (vente_id, rang, libelle, date_echeance, montant) VALUES (?, ?, ?, ?, ?)');
-    const insP = db.prepare('INSERT INTO paiements (echeance_id, montant, date_paiement, mode) VALUES (?, ?, ?, ?)');
+  // [client, refs, statut, signature (mois), acompte %, nb échéances, périodicité, nb échéances payées, paiement partiel de la suivante]
+  const ventes = [
+    [0, ['A-102', 'C-01', 'P-01'], 'vente', -8, 30, 8, 'mensuelle', 5, 0],
+    [1, ['A-203', 'P-02'], 'vente', -6, 20, 4, 'trimestrielle', 2, 0.4],
+    [2, ['B-101', 'C-02'], 'reservation', -3, 10, 12, 'mensuelle', 3, 0],
+    [3, ['A-301', 'C-03', 'P-03'], 'vente', -1, 30, 6, 'mensuelle', 1, 0],
+    [4, ['B-002', 'P-04'], 'vente', 0, 30, 10, 'mensuelle', 1, 0],
+    [5, ['A-001'], 'vente', 0, 20, 12, 'mensuelle', 1, 0],
+    // Ventes des mois précédents, à jour de leurs paiements (pour l'historique des objectifs)
+    [4, ['B-102'], 'vente', -2, 30, 12, 'mensuelle', 3, 0],
+    [5, ['A-103'], 'vente', -2, 30, 12, 'mensuelle', 3, 0],
+    [5, ['A-202', 'P-05'], 'vente', -3, 30, 12, 'mensuelle', 4, 0],
+    [4, ['B-201'], 'vente', -4, 30, 12, 'mensuelle', 5, 0],
+  ];
+  for (const [ci, refs, statut, m, acompte, nb, per, nbPayees, partiel] of ventes) {
+    const prix = refs.reduce((s, r) => s + parRef[r].prix, 0);
+    const sig = mois(m);
+    const lignes = genererEcheancier({ prixTotal: prix, acomptePct: acompte, nbEcheances: nb, periodicite: per, dateSignature: sig, datePremiere: mois(m + 1) });
+    await Vente.create({
+      client: clients[ci]._id, statut, prix_total: prix, date_signature: sig, date_vente: statut === 'vente' ? sig : null, lots: refs.map((r) => parRef[r]._id),
+      echeances: lignes.map((l, i) => ({
+        ...l,
+        paiements: i < nbPayees ? [{ montant: l.montant, date_paiement: l.date_echeance, mode: i === 0 ? 'Chèque' : 'Virement' }]
+          : i === nbPayees && partiel ? [{ montant: Math.round(l.montant * partiel), date_paiement: l.date_echeance, mode: 'Virement' }] : [],
+      })),
+    });
+  }
 
-    // [client, refs, statut, signature (mois), acompte %, nb échéances, périodicité, nb échéances payées, paiement partiel de la suivante]
-    const ventes = [
-      [0, ['A-102', 'C-01', 'P-01'], 'vente', -8, 30, 8, 'mensuelle', 5, 0],
-      [1, ['A-203', 'P-02'], 'vente', -6, 20, 4, 'trimestrielle', 2, 0.4],
-      [2, ['B-101', 'C-02'], 'reservation', -3, 10, 12, 'mensuelle', 3, 0],
-      [3, ['A-301', 'C-03', 'P-03'], 'vente', -1, 30, 6, 'mensuelle', 1, 0],
-    ];
-    for (const [ci, refs, statut, m, acompte, nb, per, nbPayees, partiel] of ventes) {
-      const prix = prixLots(refs);
-      const sig = mois(m);
-      const vid = Number(insVente.run(clients[ci], statut, prix, sig).lastInsertRowid);
-      refs.forEach((r) => insVL.run(vid, lots[r]));
-      const lignes = genererEcheancier({ prixTotal: prix, acomptePct: acompte, nbEcheances: nb, periodicite: per, dateSignature: sig, datePremiere: mois(m + 1) });
-      lignes.forEach((l, i) => {
-        const eid = Number(insE.run(vid, l.rang, l.libelle, l.date_echeance, l.montant).lastInsertRowid);
-        if (i < nbPayees) insP.run(eid, l.montant, l.date_echeance, i === 0 ? 'Chèque' : 'Virement');
-        else if (i === nbPayees && partiel) insP.run(eid, Math.round(l.montant * partiel), l.date_echeance, 'Virement');
-      });
-    }
+  // Objectifs d'exemple : 3 appartements par mois depuis 6 mois, 4 ce mois-ci.
+  await Objectif.create([{ mois: mois(-5).slice(0, 7), appartements: 3 }, { mois: mois(0).slice(0, 7), appartements: 4 }]);
 
-    db.prepare(`INSERT INTO users (email, nom, password_hash, role) VALUES (?, ?, ?, 'admin')`).run('admin@societe.tn', 'Service commercial', hashPassword('admin123'));
-    db.prepare(`INSERT INTO users (email, nom, password_hash, role, client_id) VALUES (?, ?, ?, 'client', ?)`).run('amine.exemple@mail.tn', 'Amine Ben Salah', hashPassword('client123'), clients[0]);
-  });
+  await User.create([
+    { email: 'admin@societe.tn', nom: 'Service commercial', password_hash: hashPassword('admin123'), role: 'admin' },
+    { email: 'amine.exemple@mail.tn', nom: 'Amine Ben Salah', password_hash: hashPassword('client123'), role: 'client', client: clients[0]._id },
+  ]);
 }

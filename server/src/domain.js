@@ -1,5 +1,5 @@
 // Règles métier : statut des lots, état des échéances, génération d'échéancier.
-import { db } from './db.js';
+import { Lot, Vente } from './db.js';
 
 export const JOURS_ALERTE_PROCHE = Number(process.env.JOURS_ALERTE_PROCHE || 7);
 
@@ -20,7 +20,7 @@ function addMonths(iso, n) {
   return target.toISOString().slice(0, 10);
 }
 
-const round3 = (x) => Math.round(x * 1000) / 1000;
+export const round3 = (x) => Math.round(x * 1000) / 1000;
 
 /** Échéancier : un acompte à la signature puis N échéances égales (la dernière absorbe l'arrondi). */
 export function genererEcheancier({ prixTotal, acomptePct = 0, nbEcheances = 1, periodicite = 'mensuelle', dateSignature, datePremiere }) {
@@ -47,71 +47,105 @@ export function etatEcheance(e, today = todayISO()) {
   return { etat: 'a_venir', reste, jours: -jours };
 }
 
-const ECHEANCES_SQL = `
-  SELECT e.*, COALESCE((SELECT SUM(p.montant) FROM paiements p WHERE p.echeance_id = e.id), 0) AS montant_paye,
-         (SELECT MAX(p.date_paiement) FROM paiements p WHERE p.echeance_id = e.id) AS dernier_paiement
-  FROM echeances e`;
+/* ---------- Mise en forme des documents pour l'API ---------- */
 
-export function echeancesDeVente(venteId) {
-  return db.prepare(`${ECHEANCES_SQL} WHERE e.vente_id = ? ORDER BY e.rang`).all(venteId)
-    .map((e) => ({ ...e, ...etatEcheance(e) }));
+export const lotJSON = (l) => ({
+  id: String(l._id), ref: l.ref, type: l.type, bloc: l.bloc ?? null, niveau: l.niveau ?? null, typologie: l.typologie ?? null,
+  surface: l.surface ?? null, prix: l.prix, bloque: !!l.bloque, notes: l.notes ?? null,
+});
+
+export function echeanceJSON(e) {
+  const montant_paye = round3((e.paiements || []).reduce((s, p) => s + p.montant, 0));
+  const derniere = (e.relances || []).reduce((d, r) => (!d || r.envoye_le > d ? r.envoye_le : d), null);
+  const base = {
+    id: String(e._id), rang: e.rang, libelle: e.libelle, date_echeance: e.date_echeance, montant: e.montant, montant_paye,
+    derniere_relance: derniere ? derniere.toISOString() : null,
+  };
+  return { ...base, ...etatEcheance(base) };
 }
 
-export function lotsDeVente(venteId) {
-  return db.prepare(`SELECT l.* FROM lots l JOIN vente_lots vl ON vl.lot_id = l.id WHERE vl.vente_id = ? ORDER BY l.type, l.ref`).all(venteId);
-}
-
-export function venteComplete(v) {
-  const echeances = echeancesDeVente(v.id);
+/** Dossier complet ; `v` doit avoir `lots` et `client` peuplés. */
+export function venteJSON(v) {
+  const echeances = [...v.echeances].sort((a, b) => a.rang - b.rang).map(echeanceJSON);
   const paye = round3(echeances.reduce((s, e) => s + e.montant_paye, 0));
   const enRetard = echeances.filter((e) => e.etat === 'retard');
-  const prochaine = echeances.find((e) => e.etat !== 'payee') || null;
   return {
-    ...v,
-    lots: lotsDeVente(v.id),
+    id: String(v._id),
+    client_id: String(v.client?._id ?? v.client),
+    client_nom: v.client?.nom,
+    client_tel: v.client?.tel,
+    client_email: v.client?.email,
+    statut: v.statut,
+    prix_total: v.prix_total,
+    date_signature: v.date_signature,
+    notes: v.notes ?? null,
+    lots: v.lots.map(lotJSON).sort((a, b) => a.type.localeCompare(b.type) || a.ref.localeCompare(b.ref)),
     echeances,
     total_paye: paye,
     reste_a_payer: round3(v.prix_total - paye),
     montant_en_retard: round3(enRetard.reduce((s, e) => s + e.reste, 0)),
     nb_retard: enRetard.length,
-    prochaine_echeance: prochaine,
+    prochaine_echeance: echeances.find((e) => e.etat !== 'payee') || null,
   };
 }
 
+export const ventesCompletes = (filtre = {}) =>
+  Vente.find(filtre).populate('lots').populate('client').sort({ date_signature: -1 });
+
 /** Lots avec statut dérivé : disponible, bloqué, réservé ou vendu. */
-export function listerLots() {
-  return db.prepare(`
-    SELECT l.*, v.id AS vente_id, v.statut AS vente_statut, c.id AS client_id, c.nom AS client_nom
-    FROM lots l
-    LEFT JOIN vente_lots vl ON vl.lot_id = l.id
-    LEFT JOIN ventes v ON v.id = vl.vente_id
-    LEFT JOIN clients c ON c.id = v.client_id
-    ORDER BY l.type, l.bloc, l.ref`).all()
-    .map((l) => ({
-      ...l,
-      statut: l.vente_id ? (l.vente_statut === 'vente' ? 'vendu' : 'reserve') : l.bloque ? 'bloque' : 'disponible',
-    }));
+export async function listerLots() {
+  const [lots, ventes] = await Promise.all([
+    Lot.find().lean(),
+    Vente.find({}, { lots: 1, statut: 1, client: 1 }).populate('client', 'nom').lean(),
+  ]);
+  const parLot = new Map();
+  for (const v of ventes) for (const id of v.lots) parLot.set(String(id), v);
+  return lots
+    .map((l) => {
+      const v = parLot.get(String(l._id));
+      return {
+        ...lotJSON(l),
+        vente_id: v ? String(v._id) : null,
+        client_id: v?.client ? String(v.client._id) : null,
+        client_nom: v?.client?.nom ?? null,
+        statut: v ? (v.statut === 'vente' ? 'vendu' : 'reserve') : l.bloque ? 'bloque' : 'disponible',
+      };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type) || (a.bloc || '').localeCompare(b.bloc || '') || a.ref.localeCompare(b.ref, 'fr', { numeric: true }));
 }
 
 /** Échéances impayées en retard ou proches, avec client et lots. */
-export function listerAlertes() {
-  const rows = db.prepare(`
-    ${ECHEANCES_SQL.replace('FROM echeances e', `, v.client_id, c.nom AS client_nom, c.tel AS client_tel, c.email AS client_email
-    FROM echeances e JOIN ventes v ON v.id = e.vente_id JOIN clients c ON c.id = v.client_id`)}
-    ORDER BY e.date_echeance`).all();
-  return rows
-    .map((e) => ({ ...e, ...etatEcheance(e) }))
-    .filter((e) => e.etat === 'retard' || e.etat === 'proche')
-    .map((e) => ({
-      ...e,
-      lots: lotsDeVente(e.vente_id).map((l) => l.ref),
-      derniere_relance: db.prepare('SELECT MAX(envoye_le) AS d FROM relances WHERE echeance_id = ?').get(e.id).d,
-    }))
-    .sort((a, b) => (a.etat === b.etat ? (a.etat === 'retard' ? b.jours - a.jours : a.jours - b.jours) : a.etat === 'retard' ? -1 : 1));
+export async function listerAlertes() {
+  const ventes = await Vente.find({ 'echeances.0': { $exists: true } }).populate('lots', 'ref').populate('client', 'nom tel email');
+  const out = [];
+  for (const v of ventes) {
+    for (const e of v.echeances) {
+      const ej = echeanceJSON(e);
+      if (ej.etat !== 'retard' && ej.etat !== 'proche') continue;
+      out.push({
+        ...ej,
+        vente_id: String(v._id),
+        client_id: String(v.client._id),
+        client_nom: v.client.nom,
+        client_tel: v.client.tel,
+        client_email: v.client.email,
+        lots: v.lots.map((l) => l.ref).sort(),
+      });
+    }
+  }
+  return out.sort((a, b) => (a.etat === b.etat ? (a.etat === 'retard' ? b.jours - a.jours : a.jours - b.jours) : a.etat === 'retard' ? -1 : 1));
 }
 
-export function messageRelance(a) {
-  const montant = Number(a.reste).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  const date = a.date_echeance.split('-').reverse().join('/');
-  return `Bonjour ${a.client_nom},\n\nSauf erreur de notre part, l'échéance « ${a.libelle} » de ${montant} DT prévue le ${date} pour ${a.lots.length > 1 ? 'les lots' : 'le lot'} ${a.lots.join(', ')} reste impayée à ce jour (${a.jours} jour${a.jours > 1 ? 's' : ''} de retard).\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial`;
+/** Message de relance pour une ou plusieurs échéances en retard d'un même client. */
+export function messageRelance(alertes) {
+  const liste = Array.isArray(alertes) ? alertes : [alertes];
+  const fmt = (n) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const date = (iso) => iso.split('-').reverse().join('/');
+  const lots = [...new Set(liste.flatMap((a) => a.lots))];
+  const pourLots = `pour ${lots.length > 1 ? 'les lots' : 'le lot'} ${lots.join(', ')}`;
+  const retard = (a) => `${a.jours} jour${a.jours > 1 ? 's' : ''} de retard`;
+  const corps = liste.length === 1
+    ? `Sauf erreur de notre part, l'échéance « ${liste[0].libelle} » de ${fmt(liste[0].reste)} DT prévue le ${date(liste[0].date_echeance)} ${pourLots} reste impayée à ce jour (${retard(liste[0])}).`
+    : `Sauf erreur de notre part, les échéances suivantes ${pourLots} restent impayées à ce jour :\n${liste.map((a) => `- ${a.libelle} prévue le ${date(a.date_echeance)} : ${fmt(a.reste)} DT (${retard(a)})`).join('\n')}\nTotal dû : ${fmt(liste.reduce((s, a) => s + a.reste, 0))} DT.`;
+  return `Bonjour ${liste[0].client_nom},\n\n${corps}\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial`;
 }

@@ -1,6 +1,5 @@
 node_modules/
 client/dist/
-server/data/
 .env
 server/sauvegardes/
-client/dist-demo/
+*.png

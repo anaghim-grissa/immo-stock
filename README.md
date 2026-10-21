@@ -2,10 +2,12 @@
 
 Application web entre la société et ses clients pour gérer le stock de **appartements, celliers et places de parking**, les réservations/ventes, les **échéanciers de paiement**, et **alerter quand une échéance est dépassée et impayée**.
 
-- **Serveur** : Node.js 22 + Express, base SQLite intégrée à Node (`node:sqlite`, aucun serveur de base à installer).
+- **Serveur** : Node.js 22 + Express, base **MongoDB** (Mongoose). Fonctionne avec un MongoDB installé sur le serveur ou avec MongoDB Atlas.
 - **Interface** : React 18 + Vite.
 
 ## Démarrage rapide
+
+Prérequis : Node.js 22.9 ou plus et un MongoDB accessible. Par défaut l'application utilise `mongodb://127.0.0.1:27017/immo-stock` ; pour une autre adresse (Atlas…), copiez `server/.env.example` en `server/.env` et renseignez `MONGODB_URI`.
 
 ```bash
 npm run install:all     # installe server/ et client/
@@ -31,6 +33,7 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 ## Fonctionnalités
 
 **Espace société**
+- *Objectifs* : nombre d'appartements vendus dans le mois face à l'objectif fixé par la société (modifiable dans l'application, repris d'un mois sur l'autre tant qu'il n'est pas changé), chiffre d'affaires signé, celliers et parkings vendus, historique sur 6 mois. Une vente compte dans le mois où le dossier passe en vente ferme.
 - *Tableau de bord* : montants encaissés, reste à encaisser, montant en retard, disponibilité du stock par type, et liste des **alertes** (échéances en retard, puis échéances dues sous 7 jours).
 - *Relance* : message de relance pré-rédigé (copier pour SMS/WhatsApp) ou envoi par email.
 - *Stock* : plan des lots par bloc et niveau, couleur selon le statut (disponible, réservé, vendu, bloqué). Ajout, modification, blocage.
@@ -44,16 +47,35 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas entièrement payée.
 
 - Toujours visibles dans le tableau de bord et l'espace client.
-- Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie une relance au client (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours par échéance. Sinon la relance est seulement journalisée.
+- Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie à chaque client en retard **un seul email** regroupant ses échéances impayées (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours. Un envoi en échec est retenté à la vérification suivante. Sans email configuré, la relance est seulement journalisée. Réglages Gmail / Microsoft 365 : voir les guides d'hébergement.
+
+### Tester les relances par email
+1. Renseignez la messagerie dans `server/.env` (voir les guides d'hébergement, section emails).
+2. `npm run test-email -- votre.adresse@exemple.com` vérifie l'envoi.
+3. `npm run client-test -- votre.adresse@exemple.com "Votre nom"` crée un client de test avec une échéance en retard. Dans le Tableau de bord, cliquez sur « Relancer » sur sa ligne, puis « Envoyer par email ».
+
+## Données (MongoDB)
+
+| Collection | Contenu |
+|---|---|
+| `lots` | appartements, celliers, places de parking (référence unique, prix, blocage) |
+| `clients` | fiches clients |
+| `ventes` | dossiers : client, lots, statut, et l'échéancier intégré (`echeances[]`, chacune avec ses `paiements[]` et `relances[]`) |
+| `objectifs` | objectif d'appartements vendus par mois (`mois` au format AAAA-MM) |
+| `users` | comptes société et clients |
+| `sessions` | connexions en cours (expirent après 30 jours) |
+
+Un index unique sur `ventes.lots` empêche qu'un lot soit dans deux dossiers.
 
 ## Structure
 
 ```
-server/src/db.js        schéma SQLite
+server/src/db.js        connexion MongoDB et modèles Mongoose
 server/src/domain.js    règles : statut des lots, état des échéances, échéancier
 server/src/routes.js    API REST (/api/...)
 server/src/alertes.js   vérification périodique + emails
 server/src/seed.js      données d'exemple
+server/src/backup.js    sauvegarde (npm run backup) / restore.js (npm run restore)
 client/src/pages/       Tableau, Stock, Ventes, Clients, Portail (espace client)
 ```
 

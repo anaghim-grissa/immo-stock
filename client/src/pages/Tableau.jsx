@@ -104,7 +104,10 @@ function Relance({ alerte, onClose }) {
   };
   const envoyer = async () => {
     const r = await api(`/alertes/${alerte.id}/relancer`, { method: 'POST' });
-    setInfo(r.envoye ? 'Email de relance envoyé au client.' : "Relance enregistrée. L'email n'est pas configuré sur le serveur (voir README).");
+    setInfo([
+      r.envoye ? 'Email de relance envoyé au client.' : "Relance enregistrée, mais l'envoi d'emails n'est pas configuré sur le serveur (voir README).",
+      ...(r.erreurs || []).map((e) => `Échec ${e}`),
+    ].join(' '));
   };
   return (
     <Modal title={`Relancer ${alerte.client_nom}`} onClose={onClose}>
