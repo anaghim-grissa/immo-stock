@@ -1,0 +1,16 @@
+{
+  "name": "immo-stock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gestion de stock immobilier (appartements, celliers, parkings) et suivi des échéances clients",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "seed": "npm --prefix server run seed",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "create-admin": "npm --prefix server run create-admin --",
+    "backup": "npm --prefix server run backup"
+  }
+}

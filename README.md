@@ -1,0 +1,65 @@
+# Résidence · Stock
+
+Application web entre la société et ses clients pour gérer le stock de **appartements, celliers et places de parking**, les réservations/ventes, les **échéanciers de paiement**, et **alerter quand une échéance est dépassée et impayée**.
+
+- **Serveur** : Node.js 22 + Express, base SQLite intégrée à Node (`node:sqlite`, aucun serveur de base à installer).
+- **Interface** : React 18 + Vite.
+
+## Démarrage rapide
+
+```bash
+npm run install:all     # installe server/ et client/
+npm run seed            # crée la base avec des données d'exemple (efface l'existant)
+
+# développement (2 terminaux)
+npm run dev:server      # API sur http://localhost:3001
+npm run dev:client      # interface sur http://localhost:5173
+
+# production
+npm run build && npm start   # tout sur http://localhost:3001
+```
+
+Comptes d'exemple créés par `npm run seed` :
+
+| Rôle | Email | Mot de passe |
+|---|---|---|
+| Société | admin@societe.tn | admin123 |
+| Client | amine.exemple@mail.tn | client123 |
+
+Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (Windows) ou [HEBERGEMENT.md](HEBERGEMENT.md) (Linux).
+
+## Fonctionnalités
+
+**Espace société**
+- *Tableau de bord* : montants encaissés, reste à encaisser, montant en retard, disponibilité du stock par type, et liste des **alertes** (échéances en retard, puis échéances dues sous 7 jours).
+- *Relance* : message de relance pré-rédigé (copier pour SMS/WhatsApp) ou envoi par email.
+- *Stock* : plan des lots par bloc et niveau, couleur selon le statut (disponible, réservé, vendu, bloqué). Ajout, modification, blocage.
+- *Ventes & échéances* : création d'un dossier (réservation ou vente ferme) regroupant plusieurs lots (ex. appartement + cellier + parking), génération automatique de l'échéancier (acompte % + N échéances mensuelles/trimestrielles/semestrielles), encaissement total ou partiel, historique des paiements, annulation du dossier (libère les lots).
+- *Clients* : fiche client, montant en retard, création de l'accès à l'espace client.
+
+**Espace client** : le client voit ses lots, son échéancier, ce qu'il a payé, ce qui reste, et une alerte s'il est en retard.
+
+## Alertes
+
+Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas entièrement payée.
+
+- Toujours visibles dans le tableau de bord et l'espace client.
+- Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie une relance au client (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours par échéance. Sinon la relance est seulement journalisée.
+
+## Structure
+
+```
+server/src/db.js        schéma SQLite
+server/src/domain.js    règles : statut des lots, état des échéances, échéancier
+server/src/routes.js    API REST (/api/...)
+server/src/alertes.js   vérification périodique + emails
+server/src/seed.js      données d'exemple
+client/src/pages/       Tableau, Stock, Ventes, Clients, Portail (espace client)
+```
+
+## Limites du prototype
+
+- Authentification simple par jeton ; prévoir HTTPS, expiration des sessions et changement de mot de passe avant production.
+- Un seul compte société ; pas encore de gestion fine des rôles (commercial, comptable…).
+- Pas d'envoi SMS intégré (le message est prêt à copier) ; un fournisseur SMS peut être branché dans `alertes.js`.
+- Montants en dinars (DT), 3 décimales.

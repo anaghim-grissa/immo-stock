@@ -1,0 +1,10 @@
+export const mkdirSync = () => {};
+export const readdirSync = () => [];
+export const statSync = () => ({ mtimeMs: 0 });
+export const unlinkSync = () => {};
+export const existsSync = () => false;
+export const dirname = () => '/';
+export const join = (...p) => p.join('/');
+export const resolve = (p) => p;
+export const fileURLToPath = () => '/demo/immo.db';
+export default {};
