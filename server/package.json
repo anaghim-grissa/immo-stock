@@ -13,7 +13,8 @@
     "create-admin": "node --env-file-if-exists=.env src/create-admin.js",
     "backup": "node --env-file-if-exists=.env src/backup.js",
     "restore": "node --env-file-if-exists=.env src/restore.js",
-    "test-email": "node --env-file-if-exists=.env src/test-email.js"
+    "test-email": "node --env-file-if-exists=.env src/test-email.js",
+    "client-test": "node --env-file-if-exists=.env src/client-test.js"
   },
   "dependencies": {
     "express": "^4.21.2",
