@@ -131,6 +131,11 @@ ALERT_EMAIL=commercial@votresociete.tn
 
 **Messagerie de votre hébergeur de domaine** (OVH, etc.) : utilisez les paramètres SMTP qu'il fournit. Avec le port 465, ajoutez `SMTP_SECURE=true`.
 
+Pour vérifier les réglages, envoyez-vous un email de test :
+```
+npm run test-email -- votre.adresse@exemple.com
+```
+
 Si un envoi échoue (mot de passe incorrect, serveur injoignable), l'erreur s'affiche dans les journaux de l'application et l'envoi est retenté à la vérification suivante.
 
 ## Mettre à jour l'application

@@ -12,6 +12,7 @@
     "start": "npm --prefix server start",
     "create-admin": "npm --prefix server run create-admin --",
     "backup": "npm --prefix server run backup --",
-    "restore": "npm --prefix server run restore --"
+    "restore": "npm --prefix server run restore --",
+    "test-email": "npm --prefix server run test-email --"
   }
 }

@@ -12,7 +12,8 @@
     "seed": "node --env-file-if-exists=.env src/seed.js",
     "create-admin": "node --env-file-if-exists=.env src/create-admin.js",
     "backup": "node --env-file-if-exists=.env src/backup.js",
-    "restore": "node --env-file-if-exists=.env src/restore.js"
+    "restore": "node --env-file-if-exists=.env src/restore.js",
+    "test-email": "node --env-file-if-exists=.env src/test-email.js"
   },
   "dependencies": {
     "express": "^4.21.2",
