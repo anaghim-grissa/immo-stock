@@ -6,9 +6,9 @@
 |---|---|---|---|
 | **Serveur VPS (OVH, Hetzner…)** | Employés **et clients**, depuis partout | 5 à 10 € / mois + nom de domaine | **Recommandé** |
 | PC/serveur dans les locaux | Employés uniquement, sur le réseau du bureau | Matériel existant | Simple, mais les clients ne peuvent pas se connecter de l'extérieur |
-| Render / Railway | Employés et clients | 7 à 20 $ / mois | Possible, mais il faut payer un **disque persistant** sinon la base est effacée à chaque redémarrage |
+| Render / Railway + MongoDB Atlas | Employés et clients | 7 à 20 $ / mois | Possible : l'application chez Render/Railway, la base chez Atlas |
 
-Comme l'application a un espace client, il faut qu'elle soit accessible sur Internet : un **VPS** est le meilleur compromis (prix fixe, base SQLite conservée, vous gardez la main sur vos données).
+Comme l'application a un espace client, il faut qu'elle soit accessible sur Internet : un **VPS** est le meilleur compromis (prix fixe, MongoDB sur le même serveur, vous gardez la main sur vos données).
 
 ---
 
@@ -24,7 +24,12 @@ Chez votre registrar, créez un enregistrement **A** : `stock.votresociete.tn` �
 ssh root@IP_DU_VPS
 apt update && apt upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs nginx unzip sqlite3
+apt install -y nodejs nginx unzip gnupg
+# MongoDB 8 (dépôt officiel)
+curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor
+echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-8.0.list
+apt update && apt install -y mongodb-org
+systemctl enable --now mongod
 npm install -g pm2
 adduser --disabled-password --gecos "" immo
 ```
@@ -41,7 +46,7 @@ unzip immo-stock.zip && cd immo-stock
 npm run install:all
 npm run build
 cp server/.env.example server/.env
-nano server/.env          # PORT=3001, réglages email (voir plus bas)
+nano server/.env          # PORT, MONGODB_URI (si Atlas), réglages email (voir plus bas)
 ```
 
 ### 4. Créer le compte société (sans données d'exemple)
@@ -80,15 +85,16 @@ ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
 L'application est alors disponible sur **https://stock.votresociete.tn** pour vos employés et vos clients.
 
 ### 7. Sauvegardes (indispensable)
-Toutes les données sont dans `server/data/immo.db`. Sauvegarde quotidienne à 2 h, 30 jours conservés :
+Les données sont dans MongoDB. Sauvegarde quotidienne à 2 h, 30 jours conservés :
 ```bash
 su - immo
-mkdir -p ~/sauvegardes
 crontab -e
 # ajouter la ligne :
-0 2 * * * sqlite3 ~/immo-stock/server/data/immo.db ".backup '/home/immo/sauvegardes/immo-$(date +\%F).db'" && find ~/sauvegardes -name '*.db' -mtime +30 -delete
+0 2 * * * cd ~/immo-stock/server && /usr/bin/node --env-file-if-exists=.env src/backup.js /home/immo/sauvegardes 30
 ```
-Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…). Les hébergeurs proposent souvent une option de sauvegarde automatique du VPS en plus.
+Restauration (remplace tout le contenu actuel) : `pm2 stop immo-stock && npm run restore -- /home/immo/sauvegardes/immo-AAAA-MM-JJ-... && pm2 start immo-stock`.
+
+Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…).
 
 ### 8. Emails de relance (facultatif)
 Dans `server/.env`, renseignez le serveur SMTP de votre messagerie (Gmail avec mot de passe d'application, Microsoft 365, ou un service comme Brevo) :
@@ -105,7 +111,7 @@ Puis `pm2 restart immo-stock`.
 ### Mettre à jour l'application
 ```bash
 su - immo && cd immo-stock
-# remplacer les fichiers par la nouvelle version (sans toucher à server/data ni server/.env)
+# remplacer les fichiers par la nouvelle version (sans toucher à server/.env)
 npm run install:all && npm run build && pm2 restart immo-stock
 ```
 

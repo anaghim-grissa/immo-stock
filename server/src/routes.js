@@ -1,48 +1,48 @@
 import { Router } from 'express';
-import { db, tx } from './db.js';
+import mongoose from 'mongoose';
+import { Lot, Client, Vente, User, Session } from './db.js';
 import { authenticate, requireRole, login, hashPassword } from './auth.js';
-import { listerLots, listerAlertes, venteComplete, genererEcheancier, messageRelance, todayISO } from './domain.js';
+import { listerLots, listerAlertes, venteJSON, ventesCompletes, genererEcheancier, messageRelance, todayISO, round3 } from './domain.js';
 import { envoyerRelance } from './alertes.js';
 
 export const api = Router();
 
-const wrap = (fn) => (req, res) => {
-  try {
-    const r = fn(req, res);
-    if (r instanceof Promise) r.catch((e) => fail(res, e));
-  } catch (e) { fail(res, e); }
-};
+const wrap = (fn) => (req, res) => Promise.resolve().then(() => fn(req, res)).catch((e) => fail(res, e));
 function fail(res, e) {
-  const msg = String(e.message || e);
-  if (msg.includes('UNIQUE') && msg.includes('lots.ref')) return res.status(409).json({ error: 'Cette référence de lot existe déjà.' });
-  if (msg.includes('UNIQUE') && msg.includes('vente_lots')) return res.status(409).json({ error: 'Un des lots est déjà réservé ou vendu.' });
-  if (msg.includes('UNIQUE') && msg.includes('users.email')) return res.status(409).json({ error: 'Cet email a déjà un accès.' });
-  if (msg.includes('FOREIGN KEY')) return res.status(409).json({ error: 'Élément utilisé ailleurs, suppression impossible.' });
-  if (e.status) return res.status(e.status).json({ error: msg });
+  if (e.code === 11000) {
+    const champ = Object.keys(e.keyPattern || {})[0];
+    const msg = { ref: 'Cette référence de lot existe déjà.', lots: 'Un des lots est déjà réservé ou vendu.', email: 'Cet email a déjà un accès.' }[champ];
+    return res.status(409).json({ error: msg || 'Doublon.' });
+  }
+  if (e instanceof mongoose.Error.CastError) return res.status(404).json({ error: 'Introuvable.' });
+  if (e instanceof mongoose.Error.ValidationError) return res.status(400).json({ error: Object.values(e.errors)[0]?.message || 'Données invalides.' });
+  if (e.status) return res.status(e.status).json({ error: e.message });
   console.error(e);
   res.status(500).json({ error: 'Erreur serveur.' });
 }
 const bad = (msg) => Object.assign(new Error(msg), { status: 400 });
+const conflict = (msg) => Object.assign(new Error(msg), { status: 409 });
 const notFound = () => Object.assign(new Error('Introuvable.'), { status: 404 });
 
 /* ---------- Authentification ---------- */
-api.post('/auth/login', wrap((req, res) => {
-  const r = login(req.body.email, req.body.password);
+api.post('/auth/login', wrap(async (req, res) => {
+  const r = await login(req.body.email, req.body.password);
   if (!r) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
   res.json(r);
 }));
 api.use(authenticate);
 api.get('/auth/me', (req, res) => res.json({ user: req.user }));
-api.post('/auth/logout', (req, res) => {
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+api.post('/auth/logout', wrap(async (req, res) => {
+  await Session.deleteOne({ token: req.token });
   res.json({ ok: true });
-});
+}));
 
 /* ---------- Espace client ---------- */
-api.get('/portail', requireRole('client'), wrap((req, res) => {
-  const client = db.prepare('SELECT id, nom, tel, email FROM clients WHERE id = ?').get(req.user.client_id);
-  const ventes = db.prepare('SELECT * FROM ventes WHERE client_id = ? ORDER BY date_signature').all(req.user.client_id).map(venteComplete);
-  res.json({ client, ventes });
+api.get('/portail', requireRole('client'), wrap(async (req, res) => {
+  const c = await Client.findById(req.user.client_id).lean();
+  if (!c) throw notFound();
+  const ventes = (await ventesCompletes({ client: c._id })).map(venteJSON).reverse();
+  res.json({ client: { id: String(c._id), nom: c.nom, tel: c.tel, email: c.email }, ventes });
 }));
 
 /* ---------- Société (admin) ---------- */
@@ -50,154 +50,167 @@ const admin = Router();
 admin.use(requireRole('admin'));
 api.use(admin);
 
-admin.get('/stats', wrap((req, res) => {
-  const lots = listerLots();
+admin.get('/stats', wrap(async (req, res) => {
+  const [lots, alertes, ventes] = await Promise.all([listerLots(), listerAlertes(), Vente.find({}, { prix_total: 1, 'echeances.paiements.montant': 1 }).lean()]);
   const parType = {};
   for (const l of lots) {
     parType[l.type] ??= { total: 0, disponible: 0, reserve: 0, vendu: 0, bloque: 0 };
     parType[l.type].total++;
     parType[l.type][l.statut]++;
   }
-  const alertes = listerAlertes();
   const retard = alertes.filter((a) => a.etat === 'retard');
-  const encaisse = db.prepare('SELECT COALESCE(SUM(montant),0) AS s FROM paiements').get().s;
-  const ventesTotal = db.prepare('SELECT COALESCE(SUM(prix_total),0) AS s FROM ventes').get().s;
+  let encaisse = 0, ventesTotal = 0;
+  for (const v of ventes) {
+    ventesTotal += v.prix_total;
+    for (const e of v.echeances) for (const p of e.paiements) encaisse += p.montant;
+  }
   res.json({
     parType,
     nb_retard: retard.length,
-    montant_retard: retard.reduce((s, a) => s + a.reste, 0),
+    montant_retard: round3(retard.reduce((s, a) => s + a.reste, 0)),
     nb_proche: alertes.length - retard.length,
-    encaisse,
-    reste_a_encaisser: ventesTotal - encaisse,
+    encaisse: round3(encaisse),
+    reste_a_encaisser: round3(ventesTotal - encaisse),
   });
 }));
 
-admin.get('/alertes', wrap((req, res) => res.json(listerAlertes().map((a) => ({ ...a, message: messageRelance(a) })))));
+admin.get('/alertes', wrap(async (req, res) => res.json((await listerAlertes()).map((a) => ({ ...a, message: messageRelance(a) })))));
 admin.post('/alertes/:id/relancer', wrap(async (req, res) => {
-  const a = listerAlertes().find((x) => x.id === Number(req.params.id));
+  const a = (await listerAlertes()).find((x) => x.id === req.params.id);
   if (!a) throw notFound();
   res.json(await envoyerRelance(a, { force: true }));
 }));
 
 /* Lots */
-const LOT_FIELDS = ['ref', 'type', 'bloc', 'niveau', 'typologie', 'surface', 'prix', 'bloque', 'notes'];
-const lotValues = (b) => LOT_FIELDS.map((f) => (f === 'bloque' ? (b.bloque ? 1 : 0) : b[f] ?? null));
-admin.get('/lots', wrap((req, res) => res.json(listerLots())));
-admin.post('/lots', wrap((req, res) => {
+const lotBody = (b) => ({
+  ref: b.ref, type: b.type, bloc: b.bloc || null, niveau: b.niveau || null, typologie: b.typologie || null,
+  surface: b.surface === '' || b.surface == null ? null : Number(b.surface), prix: Number(b.prix) || 0, bloque: !!b.bloque, notes: b.notes || null,
+});
+admin.get('/lots', wrap(async (req, res) => res.json(await listerLots())));
+admin.post('/lots', wrap(async (req, res) => {
   if (!req.body.ref || !req.body.type) throw bad('Référence et type obligatoires.');
-  const r = db.prepare(`INSERT INTO lots (${LOT_FIELDS}) VALUES (${LOT_FIELDS.map(() => '?')})`).run(...lotValues(req.body));
-  res.status(201).json({ id: Number(r.lastInsertRowid) });
+  const l = await Lot.create(lotBody(req.body));
+  res.status(201).json({ id: String(l._id) });
 }));
-admin.put('/lots/:id', wrap((req, res) => {
-  const r = db.prepare(`UPDATE lots SET ${LOT_FIELDS.map((f) => `${f} = ?`)} WHERE id = ?`).run(...lotValues(req.body), req.params.id);
-  if (!r.changes) throw notFound();
+admin.put('/lots/:id', wrap(async (req, res) => {
+  const l = await Lot.findByIdAndUpdate(req.params.id, lotBody(req.body), { runValidators: true });
+  if (!l) throw notFound();
   res.json({ ok: true });
 }));
-admin.delete('/lots/:id', wrap((req, res) => {
-  db.prepare('DELETE FROM lots WHERE id = ?').run(req.params.id);
+admin.delete('/lots/:id', wrap(async (req, res) => {
+  if (await Vente.exists({ lots: req.params.id })) throw conflict('Ce lot fait partie d’un dossier, suppression impossible.');
+  await Lot.deleteOne({ _id: req.params.id });
   res.json({ ok: true });
 }));
 
 /* Clients */
 const CLIENT_FIELDS = ['nom', 'cin', 'tel', 'email', 'adresse'];
-admin.get('/clients', wrap((req, res) => {
-  const clients = db.prepare(`
-    SELECT c.*, (SELECT COUNT(*) FROM ventes v WHERE v.client_id = c.id) AS nb_ventes,
-           (SELECT email FROM users u WHERE u.client_id = c.id) AS acces_email
-    FROM clients c ORDER BY c.nom`).all();
-  const retards = {};
-  for (const a of listerAlertes()) if (a.etat === 'retard') retards[a.client_id] = (retards[a.client_id] || 0) + a.reste;
-  res.json(clients.map((c) => ({ ...c, montant_retard: retards[c.id] || 0 })));
+const clientBody = (b) => Object.fromEntries(CLIENT_FIELDS.map((f) => [f, b[f] ?? null]));
+admin.get('/clients', wrap(async (req, res) => {
+  const [clients, ventes, users, alertes] = await Promise.all([
+    Client.find().sort({ nom: 1 }).lean(),
+    Vente.find({}, { client: 1 }).lean(),
+    User.find({ role: 'client' }, { email: 1, client: 1 }).lean(),
+    listerAlertes(),
+  ]);
+  const nb = {}, acces = {}, retards = {};
+  for (const v of ventes) nb[v.client] = (nb[v.client] || 0) + 1;
+  for (const u of users) acces[u.client] = u.email;
+  for (const a of alertes) if (a.etat === 'retard') retards[a.client_id] = (retards[a.client_id] || 0) + a.reste;
+  res.json(clients.map((c) => ({
+    id: String(c._id), ...clientBody(c), nb_ventes: nb[c._id] || 0, acces_email: acces[c._id] || null, montant_retard: round3(retards[c._id] || 0),
+  })));
 }));
-admin.post('/clients', wrap((req, res) => {
+admin.post('/clients', wrap(async (req, res) => {
   if (!req.body.nom) throw bad('Le nom est obligatoire.');
-  const r = db.prepare(`INSERT INTO clients (${CLIENT_FIELDS}) VALUES (${CLIENT_FIELDS.map(() => '?')})`).run(...CLIENT_FIELDS.map((f) => req.body[f] ?? null));
-  res.status(201).json({ id: Number(r.lastInsertRowid) });
+  const c = await Client.create(clientBody(req.body));
+  res.status(201).json({ id: String(c._id) });
 }));
-admin.put('/clients/:id', wrap((req, res) => {
-  db.prepare(`UPDATE clients SET ${CLIENT_FIELDS.map((f) => `${f} = ?`)} WHERE id = ?`).run(...CLIENT_FIELDS.map((f) => req.body[f] ?? null), req.params.id);
+admin.put('/clients/:id', wrap(async (req, res) => {
+  if (!(await Client.findByIdAndUpdate(req.params.id, clientBody(req.body)))) throw notFound();
   res.json({ ok: true });
 }));
-admin.delete('/clients/:id', wrap((req, res) => {
-  db.prepare('DELETE FROM clients WHERE id = ?').run(req.params.id);
+admin.delete('/clients/:id', wrap(async (req, res) => {
+  if (await Vente.exists({ client: req.params.id })) throw conflict('Ce client a des dossiers, suppression impossible.');
+  await User.deleteMany({ client: req.params.id });
+  await Client.deleteOne({ _id: req.params.id });
   res.json({ ok: true });
 }));
-admin.post('/clients/:id/acces', wrap((req, res) => {
-  const c = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
+admin.post('/clients/:id/acces', wrap(async (req, res) => {
+  const c = await Client.findById(req.params.id);
   if (!c) throw notFound();
-  const email = req.body.email || c.email;
+  const email = String(req.body.email || c.email || '').toLowerCase().trim();
   if (!email || !req.body.password || req.body.password.length < 6) throw bad('Email et mot de passe (6 caractères min.) obligatoires.');
-  tx(() => {
-    db.prepare('DELETE FROM users WHERE client_id = ?').run(c.id);
-    db.prepare(`INSERT INTO users (email, nom, password_hash, role, client_id) VALUES (?, ?, ?, 'client', ?)`).run(email, c.nom, hashPassword(req.body.password), c.id);
-  });
+  const autre = await User.findOne({ email, client: { $ne: c._id } });
+  if (autre) throw conflict('Cet email a déjà un accès.');
+  await User.deleteMany({ client: c._id });
+  await User.create({ email, nom: c.nom, password_hash: hashPassword(req.body.password), role: 'client', client: c._id });
   res.json({ ok: true, email });
 }));
 
 /* Ventes & échéances */
-admin.get('/ventes', wrap((req, res) => {
-  const ventes = db.prepare('SELECT v.*, c.nom AS client_nom FROM ventes v JOIN clients c ON c.id = v.client_id ORDER BY v.date_signature DESC').all();
-  res.json(ventes.map(venteComplete));
-}));
-admin.get('/ventes/:id', wrap((req, res) => {
-  const v = db.prepare('SELECT v.*, c.nom AS client_nom, c.tel AS client_tel, c.email AS client_email FROM ventes v JOIN clients c ON c.id = v.client_id WHERE v.id = ?').get(req.params.id);
+admin.get('/ventes', wrap(async (req, res) => res.json((await ventesCompletes()).map(venteJSON))));
+admin.get('/ventes/:id', wrap(async (req, res) => {
+  const v = await Vente.findById(req.params.id).populate('lots').populate('client');
   if (!v) throw notFound();
-  const out = venteComplete(v);
-  out.paiements = db.prepare('SELECT p.*, e.libelle FROM paiements p JOIN echeances e ON e.id = p.echeance_id WHERE e.vente_id = ? ORDER BY p.date_paiement').all(v.id);
+  const out = venteJSON(v);
+  out.paiements = v.echeances
+    .flatMap((e) => e.paiements.map((p) => ({ id: String(p._id), libelle: e.libelle, montant: p.montant, date_paiement: p.date_paiement, mode: p.mode ?? null, reference: p.reference ?? null })))
+    .sort((a, b) => a.date_paiement.localeCompare(b.date_paiement));
   res.json(out);
 }));
-admin.post('/ventes/apercu', wrap((req, res) => res.json(genererEcheancier(parseVente(req.body)))));
-admin.post('/ventes', wrap((req, res) => {
+admin.post('/ventes/apercu', wrap(async (req, res) => res.json(genererEcheancier(parseVente(req.body)))));
+admin.post('/ventes', wrap(async (req, res) => {
   const p = parseVente(req.body);
   if (!p.clientId) throw bad('Choisissez un client.');
   if (!p.lotIds.length) throw bad('Choisissez au moins un lot.');
   const lignes = Array.isArray(req.body.echeances) && req.body.echeances.length ? req.body.echeances : genererEcheancier(p);
   const somme = lignes.reduce((s, l) => s + Number(l.montant), 0);
   if (Math.abs(somme - p.prixTotal) > 0.01) throw bad(`Le total des échéances (${somme.toFixed(3)}) ne correspond pas au prix (${p.prixTotal.toFixed(3)}).`);
-  const id = tx(() => {
-    for (const lotId of p.lotIds) {
-      const l = db.prepare('SELECT bloque FROM lots WHERE id = ?').get(lotId);
-      if (!l) throw bad('Lot introuvable.');
-      if (l.bloque) throw bad('Un des lots est bloqué.');
-    }
-    const r = db.prepare('INSERT INTO ventes (client_id, statut, prix_total, date_signature, notes) VALUES (?, ?, ?, ?, ?)')
-      .run(p.clientId, p.statut, p.prixTotal, p.dateSignature, req.body.notes ?? null);
-    const vid = Number(r.lastInsertRowid);
-    for (const lotId of p.lotIds) db.prepare('INSERT INTO vente_lots (vente_id, lot_id) VALUES (?, ?)').run(vid, lotId);
-    lignes.forEach((l, i) => db.prepare('INSERT INTO echeances (vente_id, rang, libelle, date_echeance, montant) VALUES (?, ?, ?, ?, ?)')
-      .run(vid, i + 1, l.libelle, l.date_echeance, Number(l.montant)));
-    return vid;
+  if (!(await Client.exists({ _id: p.clientId }))) throw bad('Client introuvable.');
+  const lots = await Lot.find({ _id: { $in: p.lotIds } }, { bloque: 1 }).lean();
+  if (lots.length !== p.lotIds.length) throw bad('Lot introuvable.');
+  if (lots.some((l) => l.bloque)) throw bad('Un des lots est bloqué.');
+  if (await Vente.exists({ lots: { $in: p.lotIds } })) throw conflict('Un des lots est déjà réservé ou vendu.');
+  const v = await Vente.create({
+    client: p.clientId, statut: p.statut, prix_total: p.prixTotal, date_signature: p.dateSignature, notes: req.body.notes ?? null, lots: p.lotIds,
+    echeances: lignes.map((l, i) => ({ rang: i + 1, libelle: l.libelle, date_echeance: l.date_echeance, montant: Number(l.montant) })),
   });
-  res.status(201).json({ id });
+  res.status(201).json({ id: String(v._id) });
 }));
-admin.put('/ventes/:id', wrap((req, res) => {
+admin.put('/ventes/:id', wrap(async (req, res) => {
   if (!['reservation', 'vente'].includes(req.body.statut)) throw bad('Statut invalide.');
-  db.prepare('UPDATE ventes SET statut = ?, notes = COALESCE(?, notes) WHERE id = ?').run(req.body.statut, req.body.notes ?? null, req.params.id);
+  const maj = { statut: req.body.statut };
+  if (req.body.notes != null) maj.notes = req.body.notes;
+  if (!(await Vente.findByIdAndUpdate(req.params.id, maj))) throw notFound();
   res.json({ ok: true });
 }));
-admin.delete('/ventes/:id', wrap((req, res) => {
-  db.prepare('DELETE FROM ventes WHERE id = ?').run(req.params.id);
+admin.delete('/ventes/:id', wrap(async (req, res) => {
+  await Vente.deleteOne({ _id: req.params.id });
   res.json({ ok: true });
 }));
 
-admin.post('/echeances/:id/paiements', wrap((req, res) => {
+admin.post('/echeances/:id/paiements', wrap(async (req, res) => {
   const montant = Number(req.body.montant);
   if (!(montant > 0)) throw bad('Montant invalide.');
-  const e = db.prepare('SELECT id FROM echeances WHERE id = ?').get(req.params.id);
-  if (!e) throw notFound();
-  db.prepare('INSERT INTO paiements (echeance_id, montant, date_paiement, mode, reference) VALUES (?, ?, ?, ?, ?)')
-    .run(e.id, montant, req.body.date_paiement || todayISO(), req.body.mode || null, req.body.reference || null);
+  const v = await Vente.findOne({ 'echeances._id': req.params.id });
+  if (!v) throw notFound();
+  v.echeances.id(req.params.id).paiements.push({ montant, date_paiement: req.body.date_paiement || todayISO(), mode: req.body.mode || null, reference: req.body.reference || null });
+  await v.save();
   res.status(201).json({ ok: true });
 }));
-admin.delete('/paiements/:id', wrap((req, res) => {
-  db.prepare('DELETE FROM paiements WHERE id = ?').run(req.params.id);
+admin.delete('/paiements/:id', wrap(async (req, res) => {
+  const v = await Vente.findOne({ 'echeances.paiements._id': req.params.id });
+  if (!v) throw notFound();
+  for (const e of v.echeances) e.paiements.pull(req.params.id);
+  await v.save();
   res.json({ ok: true });
 }));
 
 function parseVente(b) {
   return {
-    clientId: Number(b.clientId) || null,
-    lotIds: (b.lotIds || []).map(Number).filter(Boolean),
+    clientId: b.clientId || null,
+    lotIds: [...new Set((b.lotIds || []).filter(Boolean).map(String))],
     statut: b.statut === 'vente' ? 'vente' : 'reservation',
     prixTotal: Number(b.prixTotal) || 0,
     acomptePct: Number(b.acomptePct) || 0,

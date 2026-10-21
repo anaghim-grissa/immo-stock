@@ -207,7 +207,7 @@ function NouvelleVente({ onClose }) {
     e.preventDefault();
     setError('');
     try {
-      const r = await api('/ventes', { method: 'POST', body: { ...f, prixTotal, clientId: Number(f.clientId) } });
+      const r = await api('/ventes', { method: 'POST', body: { ...f, prixTotal } });
       onClose(r.id);
     } catch (err) { setError(err.message); }
   };

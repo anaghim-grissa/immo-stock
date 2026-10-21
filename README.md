@@ -2,10 +2,12 @@
 
 Application web entre la société et ses clients pour gérer le stock de **appartements, celliers et places de parking**, les réservations/ventes, les **échéanciers de paiement**, et **alerter quand une échéance est dépassée et impayée**.
 
-- **Serveur** : Node.js 22 + Express, base SQLite intégrée à Node (`node:sqlite`, aucun serveur de base à installer).
+- **Serveur** : Node.js 22 + Express, base **MongoDB** (Mongoose). Fonctionne avec un MongoDB installé sur le serveur ou avec MongoDB Atlas.
 - **Interface** : React 18 + Vite.
 
 ## Démarrage rapide
+
+Prérequis : Node.js 22.9 ou plus et un MongoDB accessible. Par défaut l'application utilise `mongodb://127.0.0.1:27017/immo-stock` ; pour une autre adresse (Atlas…), copiez `server/.env.example` en `server/.env` et renseignez `MONGODB_URI`.
 
 ```bash
 npm run install:all     # installe server/ et client/
@@ -46,14 +48,27 @@ Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas 
 - Toujours visibles dans le tableau de bord et l'espace client.
 - Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie une relance au client (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours par échéance. Sinon la relance est seulement journalisée.
 
+## Données (MongoDB)
+
+| Collection | Contenu |
+|---|---|
+| `lots` | appartements, celliers, places de parking (référence unique, prix, blocage) |
+| `clients` | fiches clients |
+| `ventes` | dossiers : client, lots, statut, et l'échéancier intégré (`echeances[]`, chacune avec ses `paiements[]` et `relances[]`) |
+| `users` | comptes société et clients |
+| `sessions` | connexions en cours (expirent après 30 jours) |
+
+Un index unique sur `ventes.lots` empêche qu'un lot soit dans deux dossiers.
+
 ## Structure
 
 ```
-server/src/db.js        schéma SQLite
+server/src/db.js        connexion MongoDB et modèles Mongoose
 server/src/domain.js    règles : statut des lots, état des échéances, échéancier
 server/src/routes.js    API REST (/api/...)
 server/src/alertes.js   vérification périodique + emails
 server/src/seed.js      données d'exemple
+server/src/backup.js    sauvegarde (npm run backup) / restore.js (npm run restore)
 client/src/pages/       Tableau, Stock, Ventes, Clients, Portail (espace client)
 ```
 

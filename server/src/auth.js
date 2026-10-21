@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { db } from './db.js';
+import { User, Session } from './db.js';
 
 export function hashPassword(pw) {
   const salt = randomBytes(16).toString('hex');
@@ -13,25 +13,29 @@ export function verifyPassword(pw, stored) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function login(email, password) {
-  const u = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?)').get(email || '');
+export async function login(email, password) {
+  const u = await User.findOne({ email: String(email || '').toLowerCase().trim() });
   if (!u || !verifyPassword(password || '', u.password_hash)) return null;
   const token = randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, u.id);
+  await Session.create({ token, user: u._id });
   return { token, user: publicUser(u) };
 }
 
 export function publicUser(u) {
-  return { id: u.id, email: u.email, nom: u.nom, role: u.role, client_id: u.client_id };
+  return { id: String(u._id), email: u.email, nom: u.nom, role: u.role, client_id: u.client ? String(u.client) : null };
 }
 
-export function authenticate(req, res, next) {
-  const token = (req.headers.authorization || '').replace(/^Bearer /, '');
-  const u = token && db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?').get(token);
-  if (!u) return res.status(401).json({ error: 'Session expirée, reconnectez-vous.' });
-  req.user = publicUser(u);
-  req.token = token;
-  next();
+export async function authenticate(req, res, next) {
+  try {
+    const token = (req.headers.authorization || '').replace(/^Bearer /, '');
+    const s = token && (await Session.findOne({ token }).populate('user'));
+    if (!s?.user) return res.status(401).json({ error: 'Session expirée, reconnectez-vous.' });
+    req.user = publicUser(s.user);
+    req.token = token;
+    next();
+  } catch (e) {
+    next(e);
+  }
 }
 
 export const requireRole = (role) => (req, res, next) =>

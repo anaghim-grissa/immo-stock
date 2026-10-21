@@ -1,105 +1,89 @@
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Connexion MongoDB et modèles (Mongoose).
+// Les dates d'échéance et de paiement sont stockées au format texte AAAA-MM-JJ :
+// ce sont des jours calendaires, sans heure ni fuseau horaire.
+import mongoose from 'mongoose';
 
-const DB_PATH = process.env.DB_PATH || fileURLToPath(new URL('../data/immo.db', import.meta.url));
-mkdirSync(dirname(DB_PATH), { recursive: true });
+const { Schema, model } = mongoose;
+const ObjectId = Schema.Types.ObjectId;
+const JOUR = { type: String, match: /^\d{4}-\d{2}-\d{2}$/ };
 
-export const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
+export const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/immo-stock';
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS lots (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ref TEXT NOT NULL UNIQUE,
-  type TEXT NOT NULL CHECK (type IN ('appartement','cellier','parking')),
-  bloc TEXT,
-  niveau TEXT,
-  typologie TEXT,
-  surface REAL,
-  prix REAL NOT NULL DEFAULT 0,
-  bloque INTEGER NOT NULL DEFAULT 0,
-  notes TEXT
-);
-
-CREATE TABLE IF NOT EXISTS clients (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  nom TEXT NOT NULL,
-  cin TEXT,
-  tel TEXT,
-  email TEXT,
-  adresse TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS ventes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
-  statut TEXT NOT NULL DEFAULT 'reservation' CHECK (statut IN ('reservation','vente')),
-  prix_total REAL NOT NULL,
-  date_signature TEXT NOT NULL,
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS vente_lots (
-  vente_id INTEGER NOT NULL REFERENCES ventes(id) ON DELETE CASCADE,
-  lot_id INTEGER NOT NULL UNIQUE REFERENCES lots(id) ON DELETE RESTRICT,
-  PRIMARY KEY (vente_id, lot_id)
-);
-
-CREATE TABLE IF NOT EXISTS echeances (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  vente_id INTEGER NOT NULL REFERENCES ventes(id) ON DELETE CASCADE,
-  rang INTEGER NOT NULL,
-  libelle TEXT NOT NULL,
-  date_echeance TEXT NOT NULL,
-  montant REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS paiements (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  echeance_id INTEGER NOT NULL REFERENCES echeances(id) ON DELETE CASCADE,
-  montant REAL NOT NULL,
-  date_paiement TEXT NOT NULL,
-  mode TEXT,
-  reference TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS relances (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  echeance_id INTEGER NOT NULL REFERENCES echeances(id) ON DELETE CASCADE,
-  canal TEXT NOT NULL,
-  destinataire TEXT,
-  envoye_le TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT NOT NULL UNIQUE,
-  nom TEXT,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','client')),
-  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`);
-
-export function tx(fn) {
-  db.exec('BEGIN');
-  try {
-    const r = fn();
-    db.exec('COMMIT');
-    return r;
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+export async function connect() {
+  await mongoose.connect(MONGODB_URI);
+  for (const m of Object.values(mongoose.models)) {
+    // Certains services compatibles MongoDB n'acceptent pas tous les types d'index : on prévient sans bloquer.
+    await m.syncIndexes().catch((e) => console.warn(`[mongodb] index de ${m.modelName} non créé : ${e.message}`));
   }
 }
+
+export const disconnect = () => mongoose.disconnect();
+
+export const Lot = model('Lot', new Schema({
+  ref: { type: String, required: true, unique: true, trim: true },
+  type: { type: String, required: true, enum: ['appartement', 'cellier', 'parking'] },
+  bloc: String,
+  niveau: String,
+  typologie: String,
+  surface: Number,
+  prix: { type: Number, required: true, default: 0 },
+  bloque: { type: Boolean, default: false },
+  notes: String,
+}));
+
+export const Client = model('Client', new Schema({
+  nom: { type: String, required: true, trim: true },
+  cin: String,
+  tel: String,
+  email: String,
+  adresse: String,
+}, { timestamps: true }));
+
+const paiementSchema = new Schema({
+  montant: { type: Number, required: true },
+  date_paiement: { ...JOUR, required: true },
+  mode: String,
+  reference: String,
+}, { timestamps: { createdAt: true, updatedAt: false } });
+
+const relanceSchema = new Schema({
+  canal: { type: String, required: true },
+  destinataire: String,
+  envoye_le: { type: Date, default: Date.now },
+});
+
+const echeanceSchema = new Schema({
+  rang: { type: Number, required: true },
+  libelle: { type: String, required: true },
+  date_echeance: { ...JOUR, required: true },
+  montant: { type: Number, required: true },
+  paiements: [paiementSchema],
+  relances: [relanceSchema],
+});
+
+// Un dossier (réservation ou vente) regroupe ses lots et son échéancier.
+// L'index unique sur `lots` empêche qu'un même lot figure dans deux dossiers.
+export const Vente = model('Vente', new Schema({
+  client: { type: ObjectId, ref: 'Client', required: true, index: true },
+  statut: { type: String, enum: ['reservation', 'vente'], default: 'reservation' },
+  prix_total: { type: Number, required: true },
+  date_signature: { ...JOUR, required: true },
+  notes: String,
+  lots: { type: [{ type: ObjectId, ref: 'Lot' }], index: { unique: true } },
+  echeances: [echeanceSchema],
+}, { timestamps: true }));
+
+export const User = model('User', new Schema({
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  nom: String,
+  password_hash: { type: String, required: true },
+  role: { type: String, enum: ['admin', 'client'], required: true },
+  client: { type: ObjectId, ref: 'Client' },
+}));
+
+// Les sessions expirent d'elles-mêmes après 30 jours (index TTL).
+export const Session = model('Session', new Schema({
+  token: { type: String, required: true, unique: true },
+  user: { type: ObjectId, ref: 'User', required: true },
+  created_at: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 30 },
+}));
