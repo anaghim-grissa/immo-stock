@@ -136,8 +136,16 @@ export async function listerAlertes() {
   return out.sort((a, b) => (a.etat === b.etat ? (a.etat === 'retard' ? b.jours - a.jours : a.jours - b.jours) : a.etat === 'retard' ? -1 : 1));
 }
 
-export function messageRelance(a) {
-  const montant = Number(a.reste).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  const date = a.date_echeance.split('-').reverse().join('/');
-  return `Bonjour ${a.client_nom},\n\nSauf erreur de notre part, l'échéance « ${a.libelle} » de ${montant} DT prévue le ${date} pour ${a.lots.length > 1 ? 'les lots' : 'le lot'} ${a.lots.join(', ')} reste impayée à ce jour (${a.jours} jour${a.jours > 1 ? 's' : ''} de retard).\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial`;
+/** Message de relance pour une ou plusieurs échéances en retard d'un même client. */
+export function messageRelance(alertes) {
+  const liste = Array.isArray(alertes) ? alertes : [alertes];
+  const fmt = (n) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const date = (iso) => iso.split('-').reverse().join('/');
+  const lots = [...new Set(liste.flatMap((a) => a.lots))];
+  const pourLots = `pour ${lots.length > 1 ? 'les lots' : 'le lot'} ${lots.join(', ')}`;
+  const retard = (a) => `${a.jours} jour${a.jours > 1 ? 's' : ''} de retard`;
+  const corps = liste.length === 1
+    ? `Sauf erreur de notre part, l'échéance « ${liste[0].libelle} » de ${fmt(liste[0].reste)} DT prévue le ${date(liste[0].date_echeance)} ${pourLots} reste impayée à ce jour (${retard(liste[0])}).`
+    : `Sauf erreur de notre part, les échéances suivantes ${pourLots} restent impayées à ce jour :\n${liste.map((a) => `- ${a.libelle} prévue le ${date(a.date_echeance)} : ${fmt(a.reste)} DT (${retard(a)})`).join('\n')}\nTotal dû : ${fmt(liste.reduce((s, a) => s + a.reste, 0))} DT.`;
+  return `Bonjour ${liste[0].client_nom},\n\n${corps}\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial`;
 }

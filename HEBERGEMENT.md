@@ -96,17 +96,26 @@ Restauration (remplace tout le contenu actuel) : `pm2 stop immo-stock && npm run
 
 Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…).
 
-### 8. Emails de relance (facultatif)
-Dans `server/.env`, renseignez le serveur SMTP de votre messagerie (Gmail avec mot de passe d'application, Microsoft 365, ou un service comme Brevo) :
+### 8. Emails de relance
+Le serveur vérifie les échéances toutes les 6 heures. Pour chaque client en retard, il envoie **un seul email** qui regroupe toutes ses échéances impayées, avec une copie à la société (`ALERT_EMAIL`). Un même client n'est pas relancé plus d'une fois tous les 7 jours (réglable avec `INTERVALLE_RELANCE_JOURS`). Le bouton « Relancer » du tableau de bord permet aussi d'envoyer un email immédiatement.
+
+Renseignez la messagerie qui envoie les emails dans `server/.env`, puis redémarrez l'application (`pm2 restart immo-stock`).
+
+**Gmail ou Google Workspace** : activez la validation en deux étapes sur le compte, puis créez un *mot de passe d'application* (Compte Google → Sécurité → Mots de passe des applications). Utilisez ce mot de passe de 16 caractères, pas le mot de passe habituel.
 ```
-SMTP_HOST=smtp-relay.brevo.com
+SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=...
-SMTP_PASS=...
-SMTP_FROM=Service commercial <commercial@votresociete.tn>
+SMTP_USER=votre.adresse@gmail.com
+SMTP_PASS=abcdefghijklmnop
+SMTP_FROM=Service commercial <votre.adresse@gmail.com>
 ALERT_EMAIL=commercial@votresociete.tn
 ```
-Puis `pm2 restart immo-stock`.
+
+**Microsoft 365 / Outlook** : `SMTP_HOST=smtp.office365.com`, `SMTP_PORT=587`, avec l'adresse et le mot de passe de la boîte d'envoi. L'administrateur doit autoriser « SMTP authentifié » pour cette boîte.
+
+**Messagerie de votre hébergeur de domaine** (OVH, etc.) : utilisez les paramètres SMTP qu'il fournit. Avec le port 465, ajoutez `SMTP_SECURE=true`.
+
+Si un envoi échoue (mot de passe incorrect, serveur injoignable), l'erreur s'affiche dans les journaux de l'application et l'envoi est retenté à la vérification suivante.
 
 ### Mettre à jour l'application
 ```bash

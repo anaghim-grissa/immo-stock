@@ -46,7 +46,7 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas entièrement payée.
 
 - Toujours visibles dans le tableau de bord et l'espace client.
-- Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie une relance au client (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours par échéance. Sinon la relance est seulement journalisée.
+- Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie à chaque client en retard **un seul email** regroupant ses échéances impayées (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours. Un envoi en échec est retenté à la vérification suivante. Sans email configuré, la relance est seulement journalisée. Réglages Gmail / Microsoft 365 : voir les guides d'hébergement.
 
 ## Données (MongoDB)
 
