@@ -1,12 +1,12 @@
 // Données d'exemple (efface la base existante).
-import { Lot, Client, Vente, User, Session } from './db.js';
+import { Lot, Client, Vente, User, Session, Objectif } from './db.js';
 import { hashPassword } from './auth.js';
 import { genererEcheancier, todayISO } from './domain.js';
 
 const mois = (n) => { const d = new Date(); d.setMonth(d.getMonth() + n); return todayISO(d); };
 
 export async function seed() {
-  await Promise.all([Session, User, Vente, Client, Lot].map((m) => m.deleteMany({})));
+  await Promise.all([Session, User, Vente, Client, Lot, Objectif].map((m) => m.deleteMany({})));
 
   const lots = [];
   const typos = [['S+1', 72, 210000], ['S+2', 98, 285000], ['S+3', 126, 365000]];
@@ -26,6 +26,8 @@ export async function seed() {
     { nom: 'Exemple – Sonia Trabelsi', cin: '07654321', tel: '+216 98 765 432', email: 'sonia.exemple@mail.tn', adresse: 'Ariana' },
     { nom: 'Exemple – Karim Jaziri', cin: '09887766', tel: '+216 55 112 233', email: 'karim.exemple@mail.tn', adresse: 'La Marsa' },
     { nom: 'Exemple – Leila Mansour', cin: '06554433', tel: '+216 21 908 070', email: 'leila.exemple@mail.tn', adresse: 'Sousse' },
+    { nom: 'Exemple – Hichem Gharbi', cin: '05443322', tel: '+216 50 223 344', email: 'hichem.exemple@mail.tn', adresse: 'Nabeul' },
+    { nom: 'Exemple – Rim Ayari', cin: '04332211', tel: '+216 92 445 566', email: 'rim.exemple@mail.tn', adresse: 'Tunis' },
   ]);
 
   // [client, refs, statut, signature (mois), acompte %, nb échéances, périodicité, nb échéances payées, paiement partiel de la suivante]
@@ -34,13 +36,20 @@ export async function seed() {
     [1, ['A-203', 'P-02'], 'vente', -6, 20, 4, 'trimestrielle', 2, 0.4],
     [2, ['B-101', 'C-02'], 'reservation', -3, 10, 12, 'mensuelle', 3, 0],
     [3, ['A-301', 'C-03', 'P-03'], 'vente', -1, 30, 6, 'mensuelle', 1, 0],
+    [4, ['B-002', 'P-04'], 'vente', 0, 30, 10, 'mensuelle', 1, 0],
+    [5, ['A-001'], 'vente', 0, 20, 12, 'mensuelle', 1, 0],
+    // Ventes des mois précédents, à jour de leurs paiements (pour l'historique des objectifs)
+    [4, ['B-102'], 'vente', -2, 30, 12, 'mensuelle', 3, 0],
+    [5, ['A-103'], 'vente', -2, 30, 12, 'mensuelle', 3, 0],
+    [5, ['A-202', 'P-05'], 'vente', -3, 30, 12, 'mensuelle', 4, 0],
+    [4, ['B-201'], 'vente', -4, 30, 12, 'mensuelle', 5, 0],
   ];
   for (const [ci, refs, statut, m, acompte, nb, per, nbPayees, partiel] of ventes) {
     const prix = refs.reduce((s, r) => s + parRef[r].prix, 0);
     const sig = mois(m);
     const lignes = genererEcheancier({ prixTotal: prix, acomptePct: acompte, nbEcheances: nb, periodicite: per, dateSignature: sig, datePremiere: mois(m + 1) });
     await Vente.create({
-      client: clients[ci]._id, statut, prix_total: prix, date_signature: sig, lots: refs.map((r) => parRef[r]._id),
+      client: clients[ci]._id, statut, prix_total: prix, date_signature: sig, date_vente: statut === 'vente' ? sig : null, lots: refs.map((r) => parRef[r]._id),
       echeances: lignes.map((l, i) => ({
         ...l,
         paiements: i < nbPayees ? [{ montant: l.montant, date_paiement: l.date_echeance, mode: i === 0 ? 'Chèque' : 'Virement' }]
@@ -48,6 +57,9 @@ export async function seed() {
       })),
     });
   }
+
+  // Objectifs d'exemple : 3 appartements par mois depuis 6 mois, 4 ce mois-ci.
+  await Objectif.create([{ mois: mois(-5).slice(0, 7), appartements: 3 }, { mois: mois(0).slice(0, 7), appartements: 4 }]);
 
   await User.create([
     { email: 'admin@societe.tn', nom: 'Service commercial', password_hash: hashPassword('admin123'), role: 'admin' },

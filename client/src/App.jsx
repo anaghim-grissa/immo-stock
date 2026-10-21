@@ -6,9 +6,11 @@ import Stock from './pages/Stock.jsx';
 import Clients from './pages/Clients.jsx';
 import Ventes from './pages/Ventes.jsx';
 import Portail from './pages/Portail.jsx';
+import Objectifs from './pages/Objectifs.jsx';
 
 const PAGES = [
   ['tableau', 'Tableau de bord', Tableau],
+  ['objectifs', 'Objectifs', Objectifs],
   ['stock', 'Stock', Stock],
   ['ventes', 'Ventes & échéances', Ventes],
   ['clients', 'Clients', Clients],

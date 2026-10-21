@@ -68,9 +68,17 @@ export const Vente = model('Vente', new Schema({
   statut: { type: String, enum: ['reservation', 'vente'], default: 'reservation' },
   prix_total: { type: Number, required: true },
   date_signature: { ...JOUR, required: true },
+  // Jour où le dossier est passé en vente ferme (vide tant que c'est une réservation).
+  date_vente: { ...JOUR, default: null },
   notes: String,
   lots: { type: [{ type: ObjectId, ref: 'Lot' }], index: { unique: true } },
   echeances: [echeanceSchema],
+}, { timestamps: true }));
+
+// Objectif de ventes d'appartements pour un mois (AAAA-MM).
+export const Objectif = model('Objectif', new Schema({
+  mois: { type: String, required: true, unique: true, match: /^\d{4}-\d{2}$/ },
+  appartements: { type: Number, required: true, min: 0 },
 }, { timestamps: true }));
 
 export const User = model('User', new Schema({

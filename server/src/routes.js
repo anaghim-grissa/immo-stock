@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Lot, Client, Vente, User, Session } from './db.js';
+import { Lot, Client, Vente, User, Session, Objectif } from './db.js';
 import { authenticate, requireRole, login, hashPassword } from './auth.js';
 import { listerLots, listerAlertes, venteJSON, ventesCompletes, genererEcheancier, messageRelance, todayISO, round3 } from './domain.js';
 import { envoyerRelance } from './alertes.js';
@@ -79,6 +79,55 @@ admin.post('/alertes/:id/relancer', wrap(async (req, res) => {
   const a = (await listerAlertes()).find((x) => x.id === req.params.id);
   if (!a) throw notFound();
   res.json(await envoyerRelance(a, { force: true }));
+}));
+
+/* Objectifs et ventes du mois */
+const decalerMois = (mois, n) => {
+  const [y, m] = mois.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+};
+admin.get('/objectifs', wrap(async (req, res) => {
+  const mois = /^\d{4}-\d{2}$/.test(req.query.mois || '') ? req.query.mois : todayISO().slice(0, 7);
+  const periode = Array.from({ length: 6 }, (_, i) => decalerMois(mois, i - 5));
+  const [ventes, objectifs] = await Promise.all([
+    Vente.find({ statut: 'vente', date_vente: { $gte: `${periode[0]}-01`, $lte: `${mois}-31` } }).populate('lots').populate('client', 'nom').lean(),
+    Objectif.find({ mois: { $lte: mois } }).sort({ mois: -1 }).lean(),
+  ]);
+  // Sans objectif saisi pour un mois, on reprend le dernier objectif connu avant lui.
+  const objectifDe = (m) => objectifs.find((o) => o.mois <= m) ?? null;
+  const historique = periode.map((m) => {
+    const vs = ventes.filter((v) => v.date_vente.startsWith(m));
+    const o = objectifDe(m);
+    return {
+      mois: m,
+      appartements: vs.reduce((n, v) => n + v.lots.filter((l) => l.type === 'appartement').length, 0),
+      objectif: o?.appartements ?? null,
+      objectif_herite: !!o && o.mois !== m,
+    };
+  });
+  const duMois = ventes.filter((v) => v.date_vente.startsWith(mois));
+  const compter = (t) => duMois.reduce((n, v) => n + v.lots.filter((l) => l.type === t).length, 0);
+  const debut = `${mois}-01`, fin = `${mois}-31`;
+  res.json({
+    mois,
+    ...historique.at(-1),
+    celliers: compter('cellier'),
+    parkings: compter('parking'),
+    montant: round3(duMois.reduce((s, v) => s + v.prix_total, 0)),
+    reservations: await Vente.countDocuments({ statut: 'reservation', date_signature: { $gte: debut, $lte: fin } }),
+    historique,
+    ventes: duMois
+      .sort((a, b) => b.date_vente.localeCompare(a.date_vente))
+      .map((v) => ({ id: String(v._id), client_nom: v.client?.nom, date_vente: v.date_vente, prix_total: v.prix_total, lots: v.lots.map((l) => ({ ref: l.ref, type: l.type, typologie: l.typologie ?? null })) })),
+  });
+}));
+admin.put('/objectifs/:mois', wrap(async (req, res) => {
+  if (!/^\d{4}-\d{2}$/.test(req.params.mois)) throw bad('Mois invalide.');
+  const n = Number(req.body.appartements);
+  if (!Number.isInteger(n) || n < 0) throw bad("L'objectif doit être un nombre entier positif.");
+  await Objectif.findOneAndUpdate({ mois: req.params.mois }, { appartements: n }, { upsert: true });
+  res.json({ ok: true });
 }));
 
 /* Lots */
@@ -173,16 +222,20 @@ admin.post('/ventes', wrap(async (req, res) => {
   if (lots.some((l) => l.bloque)) throw bad('Un des lots est bloqué.');
   if (await Vente.exists({ lots: { $in: p.lotIds } })) throw conflict('Un des lots est déjà réservé ou vendu.');
   const v = await Vente.create({
-    client: p.clientId, statut: p.statut, prix_total: p.prixTotal, date_signature: p.dateSignature, notes: req.body.notes ?? null, lots: p.lotIds,
+    client: p.clientId, statut: p.statut, prix_total: p.prixTotal, date_signature: p.dateSignature,
+    date_vente: p.statut === 'vente' ? p.dateSignature : null, notes: req.body.notes ?? null, lots: p.lotIds,
     echeances: lignes.map((l, i) => ({ rang: i + 1, libelle: l.libelle, date_echeance: l.date_echeance, montant: Number(l.montant) })),
   });
   res.status(201).json({ id: String(v._id) });
 }));
 admin.put('/ventes/:id', wrap(async (req, res) => {
   if (!['reservation', 'vente'].includes(req.body.statut)) throw bad('Statut invalide.');
-  const maj = { statut: req.body.statut };
-  if (req.body.notes != null) maj.notes = req.body.notes;
-  if (!(await Vente.findByIdAndUpdate(req.params.id, maj))) throw notFound();
+  const v = await Vente.findById(req.params.id);
+  if (!v) throw notFound();
+  if (req.body.statut !== v.statut) v.date_vente = req.body.statut === 'vente' ? todayISO() : null;
+  v.statut = req.body.statut;
+  if (req.body.notes != null) v.notes = req.body.notes;
+  await v.save();
   res.json({ ok: true });
 }));
 admin.delete('/ventes/:id', wrap(async (req, res) => {

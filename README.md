@@ -33,6 +33,7 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 ## Fonctionnalités
 
 **Espace société**
+- *Objectifs* : nombre d'appartements vendus dans le mois face à l'objectif fixé par la société (modifiable dans l'application, repris d'un mois sur l'autre tant qu'il n'est pas changé), chiffre d'affaires signé, celliers et parkings vendus, historique sur 6 mois. Une vente compte dans le mois où le dossier passe en vente ferme.
 - *Tableau de bord* : montants encaissés, reste à encaisser, montant en retard, disponibilité du stock par type, et liste des **alertes** (échéances en retard, puis échéances dues sous 7 jours).
 - *Relance* : message de relance pré-rédigé (copier pour SMS/WhatsApp) ou envoi par email.
 - *Stock* : plan des lots par bloc et niveau, couleur selon le statut (disponible, réservé, vendu, bloqué). Ajout, modification, blocage.
@@ -55,6 +56,7 @@ Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas 
 | `lots` | appartements, celliers, places de parking (référence unique, prix, blocage) |
 | `clients` | fiches clients |
 | `ventes` | dossiers : client, lots, statut, et l'échéancier intégré (`echeances[]`, chacune avec ses `paiements[]` et `relances[]`) |
+| `objectifs` | objectif d'appartements vendus par mois (`mois` au format AAAA-MM) |
 | `users` | comptes société et clients |
 | `sessions` | connexions en cours (expirent après 30 jours) |
 
