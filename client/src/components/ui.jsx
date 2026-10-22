@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { STATUTS_LOT, etatLabel } from '../format.js';
+import { reglages } from '../api.js';
 
 export function Modal({ title, onClose, children, wide }) {
   const ref = useRef();
@@ -39,6 +40,20 @@ export function Progress({ value, max }) {
   return (
     <div className="progress" aria-label={`${Math.round(pct)} % payé`}>
       <div style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** Rappelle que toutes les échéances tombent le même jour du mois. */
+export function NoteJourEcheance({ children }) {
+  const [r, setR] = useState(null);
+  useEffect(() => { reglages().then(setR).catch(() => {}); }, []);
+  if (!r) return null;
+  const jour = (n) => (n === 1 ? '1er' : String(n));
+  return (
+    <div className="note-jour">
+      <p>Toutes les échéances sont à payer <strong>le {jour(r.jour_echeance)} de chaque mois</strong>. Un rappel est envoyé par email le {jour(r.jour_rappel)} du mois.</p>
+      {children}
     </div>
   );
 }

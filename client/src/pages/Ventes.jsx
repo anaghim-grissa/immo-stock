@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { dt, date, today, TYPES } from '../format.js';
-import { Modal, Field, ErrorLine, EtatEcheance, Progress } from '../components/ui.jsx';
+import { Modal, Field, ErrorLine, EtatEcheance, Progress, NoteJourEcheance } from '../components/ui.jsx';
 import { ClientForm } from './Clients.jsx';
 
 export default function Ventes({ nav, go }) {
@@ -30,6 +30,7 @@ export default function Ventes({ nav, go }) {
         <span className="spacer" />
         <button className="primary" onClick={() => setCreer(true)}>Nouvelle réservation / vente</button>
       </div>
+      <NoteJourEcheance><AlignerEcheances onDone={load} /></NoteJourEcheance>
       <div className="dossiers">
         {list.map((v) => (
           <button key={v.id} className={`dossier ${v.nb_retard ? 'is-late' : ''}`} onClick={() => go('ventes', { venteId: v.id })}>
@@ -95,6 +96,7 @@ function VenteDetail({ id, retour }) {
 
       <section className="card">
         <h2>Échéancier</h2>
+        <NoteJourEcheance />
         <div className="table-wrap">
           <table>
             <thead><tr><th>#</th><th>Libellé</th><th>Date prévue</th><th className="num">Montant</th><th className="num">Payé</th><th className="num">Reste</th><th>État</th><th /></tr></thead>
@@ -174,6 +176,39 @@ function Encaisser({ e, onClose }) {
         <div className="actions full"><span className="spacer" /><button className="primary" type="submit">Enregistrer le paiement</button></div>
       </form>
     </Modal>
+  );
+}
+
+/** Anciens dossiers : propose de placer leurs échéances à venir sur le jour commun. */
+function AlignerEcheances({ onDone }) {
+  const [nombre, setNombre] = useState(0);
+  const [ouvert, setOuvert] = useState(false);
+  const [error, setError] = useState('');
+  const compter = () => api('/echeances/a-aligner').then((r) => setNombre(r.nombre)).catch(() => {});
+  useEffect(() => { compter(); }, []);
+  if (!nombre) return null;
+  const aligner = async () => {
+    try {
+      await api('/echeances/aligner', { method: 'POST' });
+      setOuvert(false);
+      compter();
+      onDone();
+    } catch (e) { setError(e.message); }
+  };
+  return (
+    <>
+      <span className="small">{nombre} échéance{nombre > 1 ? 's' : ''} d'anciens dossiers à une autre date.{' '}
+        <button className="primary sm" onClick={() => setOuvert(true)}>Les mettre au même jour</button>
+      </span>
+      {ouvert && (
+        <Modal title="Mettre les anciennes échéances au même jour" onClose={() => setOuvert(false)}>
+          <p>Chaque échéance à venir et pas encore payée est déplacée au prochain jour d'échéance du mois (jamais plus tôt : un client n'a jamais moins de temps pour payer).</p>
+          <p className="muted">Les échéances payées, les acomptes et les échéances déjà en retard ne changent pas.</p>
+          <ErrorLine error={error} />
+          <div className="actions"><span className="spacer" /><button className="primary" onClick={aligner}>Déplacer {nombre} échéance{nombre > 1 ? 's' : ''}</button></div>
+        </Modal>
+      )}
+    </>
   );
 }
 
