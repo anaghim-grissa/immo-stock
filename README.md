@@ -37,7 +37,7 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 - *Tableau de bord* : montants encaissés, reste à encaisser, montant en retard, disponibilité du stock par type, et liste des **alertes** (échéances en retard, puis échéances dues sous 7 jours).
 - *Relance* : message de relance pré-rédigé (copier pour SMS/WhatsApp) ou envoi par email.
 - *Stock* : plan des lots par bloc et niveau, couleur selon le statut (disponible, réservé, vendu, bloqué). Ajout, modification, blocage.
-- *Ventes & échéances* : création d'un dossier (réservation ou vente ferme) regroupant plusieurs lots (ex. appartement + cellier + parking), génération automatique de l'échéancier (acompte % + N échéances mensuelles/trimestrielles/semestrielles), encaissement total ou partiel, historique des paiements, annulation du dossier (libère les lots).
+- *Ventes & échéances* : création d'un dossier (réservation ou vente ferme) regroupant plusieurs lots (ex. appartement + cellier + parking), génération automatique de l'échéancier (acompte % + N échéances mensuelles/trimestrielles/semestrielles, toutes le **10 du mois** pour tous les clients), encaissement total ou partiel, historique des paiements, annulation du dossier (libère les lots).
 - *Clients* : fiche client, montant en retard, création de l'accès à l'espace client.
 
 **Espace client** : le client voit ses lots, son échéancier, ce qu'il a payé, ce qui reste, et une alerte s'il est en retard.
@@ -47,11 +47,12 @@ Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (
 Une échéance est **en retard** quand sa date est passée et qu'elle n'est pas entièrement payée.
 
 - Toujours visibles dans le tableau de bord et l'espace client.
+- **Rappel du 1er du mois** : si l'email est configuré, chaque client qui a une échéance ce mois-ci reçoit le 1er un email qui rappelle la date (le 10) et le montant (copie à `ALERT_EMAIL`). Une échéance n'est rappelée qu'une fois ; si le serveur était éteint le 1er, le rappel part dès son démarrage. Jours réglables avec `JOUR_ECHEANCE` et `JOUR_RAPPEL`.
 - Le serveur vérifie automatiquement toutes les 6 h. Si l'email est configuré (`server/.env`, voir `.env.example`), il envoie à chaque client en retard **un seul email** regroupant ses échéances impayées (copie à `ALERT_EMAIL`), au plus une fois tous les 7 jours. Un envoi en échec est retenté à la vérification suivante. Sans email configuré, la relance est seulement journalisée. Réglages Gmail / Microsoft 365 : voir les guides d'hébergement.
 
 ### Tester les relances par email
 1. Renseignez la messagerie dans `server/.env` (voir les guides d'hébergement, section emails).
-2. `npm run test-email -- votre.adresse@exemple.com` vérifie l'envoi.
+2. `npm run test-email -- votre.adresse@exemple.com` vérifie l'envoi (vous recevez un exemple de rappel du 1er et un exemple de relance de retard).
 3. `npm run client-test -- votre.adresse@exemple.com "Votre nom"` crée un client de test avec une échéance en retard. Dans le Tableau de bord, cliquez sur « Relancer » sur sa ligne, puis « Envoyer par email ».
 
 ## Données (MongoDB)

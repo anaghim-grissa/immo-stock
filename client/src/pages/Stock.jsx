@@ -64,7 +64,7 @@ export default function Stock({ go, nav }) {
 }
 
 function LotForm({ lot, onClose, go }) {
-  const [f, setF] = useState({ ref: '', type: 'appartement', bloc: '', niveau: '', typologie: '', surface: '', prix: '', bloque: false, notes: '', ...lot, bloque: !!lot.bloque });
+  const [f, setF] = useState({ ref: '', type: 'appartement', bloc: '', niveau: '', typologie: '', surface: '', prix: '', notes: '', ...lot, bloque: !!lot.bloque });
   const [error, setError] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });

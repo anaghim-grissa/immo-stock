@@ -96,8 +96,10 @@ Restauration (remplace tout le contenu actuel) : `pm2 stop immo-stock && npm run
 
 Copiez aussi régulièrement ces sauvegardes hors du serveur (Google Drive, disque de la société…).
 
-### 8. Emails de relance
+### 8. Emails de rappel et de relance
 Le serveur vérifie les échéances toutes les 6 heures. Pour chaque client en retard, il envoie **un seul email** qui regroupe toutes ses échéances impayées, avec une copie à la société (`ALERT_EMAIL`). Un même client n'est pas relancé plus d'une fois tous les 7 jours (réglable avec `INTERVALLE_RELANCE_JOURS`). Le bouton « Relancer » du tableau de bord permet aussi d'envoyer un email immédiatement.
+
+Le **1er de chaque mois**, il envoie aussi à chaque client qui a une échéance ce mois-ci un **rappel** avec la date (toutes les échéances tombent le 10) et le montant. Chaque échéance n'est rappelée qu'une fois ; si l'application était arrêtée le 1er, le rappel part dès qu'elle redémarre. Pour changer ces jours : `JOUR_ECHEANCE=10` et `JOUR_RAPPEL=1` dans `server/.env`.
 
 Renseignez la messagerie qui envoie les emails dans `server/.env`, puis redémarrez l'application (`pm2 restart immo-stock`).
 

@@ -1,7 +1,8 @@
-// Vérification périodique des échéances en retard et envoi des relances par email.
+// Vérification périodique des échéances : rappel en début de mois pour les échéances à venir,
+// relance par email pour les échéances en retard.
 // Sans configuration SMTP, les alertes restent visibles dans le tableau de bord et sont journalisées.
 import { Vente } from './db.js';
-import { listerAlertes, messageRelance } from './domain.js';
+import { listerAlertes, listerRappels, messageRelance, messageRappel } from './domain.js';
 
 const INTERVALLE_RELANCE_JOURS = Number(process.env.INTERVALLE_RELANCE_JOURS || 7);
 
@@ -60,8 +61,34 @@ export async function envoyerRelance(alertes, { force = false } = {}) {
   return { envoye: canaux.length > 0, canaux, erreurs };
 }
 
-/** Vérifie les retards et envoie au plus une relance groupée par client. */
+/** Envoie à un client le rappel de ses échéances du mois ; chaque échéance n'est rappelée qu'une fois. */
+export async function envoyerRappel(echeances) {
+  const a = echeances[0];
+  const t = await getTransporter();
+  // Sans messagerie ou sans adresse, rien n'est noté : le rappel partira quand ce sera possible.
+  if (!t || !a.client_email) return false;
+  const dates = [...new Set(echeances.map((x) => x.date_echeance.split('-').reverse().join('/')))].join(', ');
+  await t.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: a.client_email,
+    cc: process.env.ALERT_EMAIL || undefined,
+    subject: `Rappel : échéance du ${dates} – ${[...new Set(echeances.flatMap((x) => x.lots))].join(', ')}`,
+    text: messageRappel(echeances),
+  });
+  for (const x of echeances) {
+    const v = await Vente.findById(x.vente_id);
+    const e = v?.echeances.id(x.id);
+    if (e) { e.rappel_le = new Date(); await v.save(); }
+  }
+  return true;
+}
+
+/** Rappels du mois (un email par client), puis relances des retards (au plus une relance groupée par client). */
 export async function verifierEcheances() {
+  const parClientRappel = Map.groupBy(await listerRappels(), (a) => a.client_id);
+  for (const echeances of parClientRappel.values()) {
+    try { await envoyerRappel(echeances); } catch (e) { console.error('[rappel] échec', echeances[0].client_nom, e.message); }
+  }
   const enRetard = (await listerAlertes()).filter((a) => a.etat === 'retard' && !relanceRecente(a));
   const parClient = Map.groupBy(enRetard, (a) => a.client_id);
   for (const alertes of parClient.values()) {
