@@ -2,7 +2,7 @@
   "name": "immo-stock",
   "version": "1.0.0",
   "private": true,
-  "description": "Gestion de stock immobilier (appartements, celliers, parkings) et suivi des échéances clients",
+  "description": "Folla Immobilière – gestion de stock immobilier (appartements, celliers, parkings) et suivi des échéances clients",
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",
     "seed": "npm --prefix server run seed",

@@ -107,7 +107,7 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=votre.adresse@gmail.com
 SMTP_PASS=abcdefghijklmnop
-SMTP_FROM=Service commercial <votre.adresse@gmail.com>
+SMTP_FROM=Folla Immobilière <votre.adresse@gmail.com>
 ALERT_EMAIL=commercial@votresociete.tn
 ```
 

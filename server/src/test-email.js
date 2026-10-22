@@ -31,7 +31,7 @@ try {
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to,
     subject: '[Test] Échéance impayée – A-101, P-07',
-    text: `Ceci est un email de test envoyé par Résidence Stock.\n\n${messageRelance(exemple)}`,
+    text: `Ceci est un email de test envoyé par Folla Immobilière.\n\n${messageRelance(exemple)}`,
   });
   console.log(`Email de test envoyé à ${to} (${info.messageId}).`);
 } catch (e) {
