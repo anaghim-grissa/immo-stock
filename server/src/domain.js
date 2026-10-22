@@ -147,5 +147,5 @@ export function messageRelance(alertes) {
   const corps = liste.length === 1
     ? `Sauf erreur de notre part, l'échéance « ${liste[0].libelle} » de ${fmt(liste[0].reste)} DT prévue le ${date(liste[0].date_echeance)} ${pourLots} reste impayée à ce jour (${retard(liste[0])}).`
     : `Sauf erreur de notre part, les échéances suivantes ${pourLots} restent impayées à ce jour :\n${liste.map((a) => `- ${a.libelle} prévue le ${date(a.date_echeance)} : ${fmt(a.reste)} DT (${retard(a)})`).join('\n')}\nTotal dû : ${fmt(liste.reduce((s, a) => s + a.reste, 0))} DT.`;
-  return `Bonjour ${liste[0].client_nom},\n\n${corps}\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial`;
+  return `Bonjour ${liste[0].client_nom},\n\n${corps}\n\nMerci de bien vouloir régulariser votre situation ou de nous contacter.\n\nCordialement,\nLe service commercial\nFolla Immobilière`;
 }

@@ -50,7 +50,7 @@ $nssm = "C:\immo-stock\outils\nssm.exe"
 $node = (Get-Command node).Source
 & $nssm install ImmoStock $node "--env-file-if-exists=.env --no-warnings=ExperimentalWarning src\index.js"
 & $nssm set ImmoStock AppDirectory C:\immo-stock\server
-& $nssm set ImmoStock DisplayName "Résidence Stock"
+& $nssm set ImmoStock DisplayName "Folla Immobiliere"
 & $nssm set ImmoStock Start SERVICE_AUTO_START
 & $nssm set ImmoStock DependOnService MongoDB      # seulement si MongoDB est installé sur ce serveur
 New-Item -ItemType Directory -Force C:\immo-stock\logs | Out-Null
@@ -62,7 +62,7 @@ L'application tourne maintenant en permanence sur le port 3001, même après un 
 
 ## 6a. Accès depuis le réseau du bureau (PC au bureau)
 ```powershell
-New-NetFirewallRule -DisplayName "Residence Stock" -Direction Inbound -Protocol TCP -LocalPort 3001 -Action Allow -Profile Private,Domain
+New-NetFirewallRule -DisplayName "Folla Immobiliere" -Direction Inbound -Protocol TCP -LocalPort 3001 -Action Allow -Profile Private,Domain
 ipconfig     # notez l'« Adresse IPv4 », par ex. 192.168.1.20
 ```
 Les employés ouvrent **http://192.168.1.20:3001**. Demandez à votre informaticien de donner une adresse IP fixe à ce PC.
@@ -98,8 +98,8 @@ Les données sont dans MongoDB. Cette tâche planifiée exporte toute la base ch
 $node = (Get-Command node).Source
 $action  = New-ScheduledTaskAction -Execute $node -Argument "--env-file-if-exists=.env src\backup.js C:\immo-stock\sauvegardes 30" -WorkingDirectory C:\immo-stock\server
 $trigger = New-ScheduledTaskTrigger -Daily -At 2am
-Register-ScheduledTask -TaskName "Sauvegarde Residence Stock" -Action $action -Trigger $trigger -User "SYSTEM" -RunLevel Highest
-Start-ScheduledTask -TaskName "Sauvegarde Residence Stock"   # premier essai tout de suite
+Register-ScheduledTask -TaskName "Sauvegarde Folla Immobiliere" -Action $action -Trigger $trigger -User "SYSTEM" -RunLevel Highest
+Start-ScheduledTask -TaskName "Sauvegarde Folla Immobiliere"   # premier essai tout de suite
 dir C:\immo-stock\sauvegardes
 ```
 Copiez aussi ce dossier ailleurs (OneDrive, Google Drive, disque externe) : si le serveur tombe en panne, ce sont vos seules données. Avec MongoDB Atlas, activez en plus les sauvegardes automatiques d'Atlas.
@@ -123,7 +123,7 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=votre.adresse@gmail.com
 SMTP_PASS=abcdefghijklmnop
-SMTP_FROM=Service commercial <votre.adresse@gmail.com>
+SMTP_FROM=Folla Immobilière <votre.adresse@gmail.com>
 ALERT_EMAIL=commercial@votresociete.tn
 ```
 

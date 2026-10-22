@@ -53,7 +53,7 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <strong>Résidence · Stock</strong>
+            <strong>Folla Immobilière</strong>
             <small>{user.role === 'admin' ? 'Espace société' : 'Espace client'}</small>
           </div>
         </div>
@@ -95,7 +95,7 @@ function Login({ onLogin }) {
     <div className="login">
       <form className="login-card" onSubmit={submit}>
         <span className="brand-mark big" aria-hidden="true" />
-        <h1>Résidence · Stock</h1>
+        <h1>Folla Immobilière</h1>
         <p className="muted">Appartements, celliers, places de parking et suivi des échéances.</p>
         <Field label="Email"><input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
         <Field label="Mot de passe"><input id="login-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>

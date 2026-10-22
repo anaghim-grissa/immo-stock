@@ -1,4 +1,4 @@
-# Résidence · Stock
+# Folla Immobilière
 
 Application web entre la société et ses clients pour gérer le stock de **appartements, celliers et places de parking**, les réservations/ventes, les **échéanciers de paiement**, et **alerter quand une échéance est dépassée et impayée**.
 
