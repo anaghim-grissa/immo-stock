@@ -200,6 +200,7 @@ function NouvelleVente({ onClose }) {
     return () => clearTimeout(t);
   }, [prixTotal, f.acomptePct, f.nbEcheances, f.periodicite, f.dateSignature, f.datePremiere]);
 
+  const jourEcheance = apercu.find((l) => l.libelle.startsWith('Échéance'))?.date_echeance.slice(8);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggleLot = (id) => setF({ ...f, lotIds: f.lotIds.includes(id) ? f.lotIds.filter((x) => x !== id) : [...f.lotIds, id] });
 
@@ -264,12 +265,13 @@ function NouvelleVente({ onClose }) {
             </select>
           </Field>
           <Field label="Date de signature"><input id="vente-sig" type="date" value={f.dateSignature} onChange={set('dateSignature')} /></Field>
-          <Field label="Première échéance" hint="Vide : une période après la signature"><input id="vente-premiere" type="date" value={f.datePremiere} onChange={set('datePremiere')} /></Field>
+          <Field label="Mois de la 1re échéance" hint="Vide : le mois après la signature"><input id="vente-premiere" type="month" value={f.datePremiere} onChange={set('datePremiere')} /></Field>
         </div>
 
         {apercu.length > 0 && (
           <div className="apercu">
             <h3>Échéancier proposé</h3>
+            {jourEcheance && <p className="muted small">Toutes les échéances tombent le {Number(jourEcheance)} du mois, comme pour les autres clients.</p>}
             <div className="table-wrap">
               <table>
                 <tbody>{apercu.map((l) => <tr key={l.rang}><td>{l.libelle}</td><td>{date(l.date_echeance)}</td><td className="num">{dt(l.montant)}</td></tr>)}</tbody>

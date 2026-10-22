@@ -270,6 +270,6 @@ function parseVente(b) {
     nbEcheances: Number(b.nbEcheances) || 1,
     periodicite: b.periodicite || 'mensuelle',
     dateSignature: b.dateSignature || todayISO(),
-    datePremiere: b.datePremiere || null,
+    datePremiere: /^\d{4}-\d{2}/.test(b.datePremiere || '') ? b.datePremiere : null,
   };
 }

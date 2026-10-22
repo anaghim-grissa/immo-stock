@@ -59,6 +59,8 @@ const echeanceSchema = new Schema({
   montant: { type: Number, required: true },
   paiements: [paiementSchema],
   relances: [relanceSchema],
+  // Rappel de début de mois déjà envoyé (une seule fois par échéance).
+  rappel_le: { type: Date, default: null },
 });
 
 // Un dossier (réservation ou vente) regroupe ses lots et son échéancier.
