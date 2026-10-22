@@ -72,7 +72,7 @@ export async function envoyerRappel(echeances) {
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: a.client_email,
     cc: process.env.ALERT_EMAIL || undefined,
-    subject: `Rappel : échéance du ${dates} – ${[...new Set(echeances.flatMap((x) => x.lots))].join(', ')}`,
+    subject: `Rappel : échéance du ${dates}${a.jours > 0 ? ` (dans ${a.jours} jour${a.jours > 1 ? 's' : ''})` : ''} – ${[...new Set(echeances.flatMap((x) => x.lots))].join(', ')}`,
     text: messageRappel(echeances),
   });
   for (const x of echeances) {
