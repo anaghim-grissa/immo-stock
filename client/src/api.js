@@ -17,3 +17,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
   return data;
 }
+
+let reglagesCache;
+/** Jour des échéances et du rappel, réglés côté serveur (server/.env). */
+export const reglages = () => (reglagesCache ||= api('/reglages').catch((e) => { reglagesCache = null; throw e; }));

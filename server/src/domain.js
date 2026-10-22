@@ -24,6 +24,15 @@ function jourEcheance(iso, n = 0) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Premier JOUR_ECHEANCE à partir de `iso` (jamais avant : une échéance déplacée ne peut pas devenir en retard). */
+export function prochainJourEcheance(iso) {
+  return iso.slice(8, 10) <= String(JOUR_ECHEANCE).padStart(2, '0') ? jourEcheance(iso) : jourEcheance(iso, 1);
+}
+
+/** Échéance à venir d'un ancien dossier, pas encore payée et qui ne tombe pas le JOUR_ECHEANCE (les retards restent tels quels). */
+export const echeanceAAligner = (e, today = todayISO()) =>
+  !e.libelle.startsWith('Acompte') && e.date_echeance >= today && e.date_echeance !== jourEcheance(e.date_echeance) && echeanceJSON(e).etat !== 'payee';
+
 /**
  * Échéancier : un acompte à la signature puis N échéances égales (la dernière absorbe l'arrondi).
  * Chaque échéance tombe le JOUR_ECHEANCE du mois (le 10 par défaut) : par défaut la première

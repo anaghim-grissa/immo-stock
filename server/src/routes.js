@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Lot, Client, Vente, User, Session, Objectif } from './db.js';
 import { authenticate, requireRole, login, hashPassword } from './auth.js';
-import { listerLots, listerAlertes, venteJSON, ventesCompletes, genererEcheancier, messageRelance, todayISO, round3 } from './domain.js';
+import { listerLots, listerAlertes, venteJSON, ventesCompletes, genererEcheancier, messageRelance, todayISO, round3, JOUR_ECHEANCE, JOUR_RAPPEL, prochainJourEcheance, echeanceAAligner } from './domain.js';
 import { envoyerRelance } from './alertes.js';
 
 export const api = Router();
@@ -32,6 +32,7 @@ api.post('/auth/login', wrap(async (req, res) => {
 }));
 api.use(authenticate);
 api.get('/auth/me', (req, res) => res.json({ user: req.user }));
+api.get('/reglages', (req, res) => res.json({ jour_echeance: JOUR_ECHEANCE, jour_rappel: JOUR_RAPPEL }));
 api.post('/auth/logout', wrap(async (req, res) => {
   await Session.deleteOne({ token: req.token });
   res.json({ ok: true });
@@ -243,6 +244,22 @@ admin.delete('/ventes/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Anciens dossiers : place les échéances impayées sur le prochain JOUR_ECHEANCE (jamais plus tôt).
+admin.get('/echeances/a-aligner', wrap(async (req, res) => {
+  const ventes = await Vente.find({ 'echeances.0': { $exists: true } });
+  res.json({ nombre: ventes.reduce((n, v) => n + v.echeances.filter((e) => echeanceAAligner(e)).length, 0) });
+}));
+admin.post('/echeances/aligner', wrap(async (req, res) => {
+  let modifiees = 0;
+  for (const v of await Vente.find({ 'echeances.0': { $exists: true } })) {
+    const aAligner = v.echeances.filter((e) => echeanceAAligner(e));
+    if (!aAligner.length) continue;
+    for (const e of aAligner) e.date_echeance = prochainJourEcheance(e.date_echeance);
+    await v.save();
+    modifiees += aAligner.length;
+  }
+  res.json({ modifiees });
+}));
 admin.post('/echeances/:id/paiements', wrap(async (req, res) => {
   const montant = Number(req.body.montant);
   if (!(montant > 0)) throw bad('Montant invalide.');

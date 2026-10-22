@@ -98,6 +98,11 @@ textarea { resize: vertical; font-family: var(--font-body); }
 .alert-band { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center;
   background: var(--danger-soft); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--radius); padding: 12px 16px; }
+.note-jour { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius); padding: 10px 16px; }
+.note-jour p { margin: 0; }
+.note-jour .muted { display: block; }
 .link-on-band { color: var(--danger); font-weight: 600; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .kpis.compact { margin: 14px 0; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }

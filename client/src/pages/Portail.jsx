@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { dt, date, TYPES } from '../format.js';
-import { EtatEcheance, Progress } from '../components/ui.jsx';
+import { EtatEcheance, Progress, NoteJourEcheance } from '../components/ui.jsx';
 
 export default function Portail() {
   const [data, setData] = useState(null);
@@ -12,6 +12,7 @@ export default function Portail() {
   return (
     <div className="stack">
       <h1 className="welcome">Bonjour {data.client.nom}</h1>
+      <NoteJourEcheance />
       {retard > 0 && (
         <section className="alert-band" role="alert">
           <strong>Vous avez {dt(retard)} d'échéances en retard.</strong>
