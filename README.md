@@ -30,6 +30,11 @@ Comptes d'exemple créés par `npm run seed` :
 
 Pour la mise en ligne, suivez [HEBERGEMENT-WINDOWS.md](HEBERGEMENT-WINDOWS.md) (Windows) ou [HEBERGEMENT.md](HEBERGEMENT.md) (Linux).
 
+## Sous Windows, en double-clic
+
+- **`demarrer.bat`** : installe ce qui manque, prépare l'interface, démarre l'application et ouvre http://localhost:3001. Laissez la fenêtre noire ouverte ; fermez-la pour arrêter. Au premier lancement, il propose de reprendre le fichier `server\.env` d'une ancienne installation (Bureau).
+- **`mettre-a-jour.bat`** : télécharge la dernière version depuis GitHub (pas besoin de Git), remplace les fichiers en gardant `server\.env` et les sauvegardes, puis redémarre. Les données restent dans MongoDB et ne sont pas touchées.
+
 ## Fonctionnalités
 
 **Espace société**
